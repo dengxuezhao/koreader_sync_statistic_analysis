@@ -1,0 +1,105 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 测试和覆盖率
+.coverage
+.pytest_cache/
+.tox/
+htmlcov/
+.nox/
+
+# 文档
+docs/_build/
+site/
+
+# MacOS
+.DS_Store
+
+# Windows
+Thumbs.db
+ehthumbs.db
+
+# 运行时生成的文件
+*.log
+*.sqlite
+*.db
+
+# 应用存储目录
+storage/
+uploads/
+static/media/
+
+# 开发配置
+.env.dev
+.env.local
+docker-compose.override.yml
+
+# 备份文件
+*.bak
+*.backup
+
+# 临时文件
+tmp/
+temp/
+*.tmp
+
+# Node.js (如果有前端构建)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# 数据库
+*.db
+*.sqlite3
+
+# 证书和密钥
+*.pem
+*.key
+*.crt
+ssl/
+certificates/
+
+# 部署特定文件
+Dockerfile.dev
+docker-compose.dev.yml 

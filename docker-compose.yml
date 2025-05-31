@@ -1,0 +1,135 @@
+version: '3.8'
+
+services:
+  # Kompanion Python应用
+  kompanion:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: kompanion-app
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      # 数据库配置
+      - KOMPANION_DATABASE_URL=postgresql+asyncpg://kompanion:kompanion123@postgres:5432/kompanion
+      - KOMPANION_DATABASE_TYPE=postgresql
+      
+      # 应用配置
+      - KOMPANION_DEBUG=false
+      - KOMPANION_APP_NAME=Kompanion Python
+      - KOMPANION_APP_VERSION=1.0.0
+      
+      # 安全配置
+      - KOMPANION_SECRET_KEY=your-secret-key-change-me-in-production
+      - KOMPANION_ACCESS_TOKEN_EXPIRE_MINUTES=30
+      - KOMPANION_ALGORITHM=HS256
+      
+      # 存储配置
+      - KOMPANION_BOOK_STORAGE_PATH=/app/storage/books
+      - KOMPANION_COVER_STORAGE_PATH=/app/storage/covers
+      - KOMPANION_MAX_BOOK_SIZE_MB=500
+      
+      # WebDAV配置
+      - KOMPANION_WEBDAV_ENABLED=true
+      - KOMPANION_WEBDAV_ROOT_PATH=/app/storage/webdav
+      
+      # 日志配置
+      - KOMPANION_LOG_LEVEL=INFO
+      
+      # CORS配置
+      - KOMPANION_ALLOWED_HOSTS=*
+      - KOMPANION_CORS_ORIGINS=*
+    volumes:
+      - book_storage:/app/storage/books
+      - cover_storage:/app/storage/covers
+      - webdav_storage:/app/storage/webdav
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - kompanion-network
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # PostgreSQL数据库
+  postgres:
+    image: postgres:15-alpine
+    container_name: kompanion-postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=kompanion
+      - POSTGRES_USER=kompanion
+      - POSTGRES_PASSWORD=kompanion123
+      - POSTGRES_INITDB_ARGS=--encoding=UTF-8 --lc-collate=C --lc-ctype=C
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init_postgres.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "5432:5432"
+    networks:
+      - kompanion-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kompanion -d kompanion"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis缓存（可选，用于会话和缓存）
+  redis:
+    image: redis:7-alpine
+    container_name: kompanion-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --requirepass redis123
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - kompanion-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # Nginx反向代理（生产环境推荐）
+  nginx:
+    image: nginx:alpine
+    container_name: kompanion-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./docker/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./docker/ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - kompanion
+    networks:
+      - kompanion-network
+    profiles:
+      - production
+
+# 数据卷
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  book_storage:
+    driver: local
+  cover_storage:
+    driver: local
+  webdav_storage:
+    driver: local
+
+# 网络
+networks:
+  kompanion-network:
+    driver: bridge 

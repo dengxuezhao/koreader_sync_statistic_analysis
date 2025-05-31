@@ -1,0 +1,256 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "kompanion-python"
+version = "1.0.0"
+description = "KOReader companion web application - Python implementation"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "Kompanion Python Team"},
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Web Environment",
+    "Framework :: FastAPI",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Internet :: WWW/HTTP :: Dynamic Content",
+    "Topic :: Multimedia :: Graphics :: Viewers",
+    "Topic :: Text Processing :: Markup :: XML",
+]
+requires-python = ">=3.12"
+dependencies = [
+    # FastAPI核心框架
+    "fastapi>=0.104.0",
+    "uvicorn[standard]>=0.24.0",
+    
+    # 数据库相关
+    "sqlalchemy[asyncio]>=2.0.23",
+    "alembic>=1.12.1",
+    "asyncpg>=0.29.0",  # PostgreSQL异步驱动
+    "aiosqlite>=0.19.0",  # SQLite异步驱动
+    
+    # 认证和安全
+    "python-jose[cryptography]>=3.3.0",
+    "passlib[bcrypt]>=1.7.4",
+    "python-multipart>=0.0.6",
+    "cryptography>=41.0.7",
+    
+    # HTTP客户端和请求处理
+    "httpx>=0.25.2",
+    "requests>=2.31.0",
+    
+    # 配置管理
+    "pydantic>=2.5.0",
+    "pydantic-settings>=2.1.0",
+    
+    # 日志处理
+    "structlog>=23.2.0",
+    
+    # 图像处理
+    "Pillow>=10.1.0",
+    
+    # 电子书处理
+    "ebooklib>=0.18",
+    "PyMuPDF>=1.23.0",
+    
+    # Web模板
+    "jinja2>=3.1.2",
+    
+    # 缓存和性能优化
+    "redis[hiredis]>=5.0.0",
+    "aioredis>=2.0.0",  # 如果需要异步Redis客户端的额外功能
+    
+    # 监控和性能分析
+    "prometheus-client>=0.19.0",
+    "colorama>=0.4.6",  # 彩色日志输出
+    
+    # 异步任务处理（可选）
+    "celery[redis]>=5.3.0",
+    
+    # HTTP客户端优化
+    "aiohttp>=3.9.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    # 测试框架
+    "pytest>=7.4.3",
+    "pytest-asyncio>=0.21.1",
+    "pytest-cov>=4.1.0",
+    "pytest-mock>=3.12.0",
+    "pytest-xdist>=3.5.0",  # 并行测试
+    
+    # 开发工具
+    "black>=23.11.0",
+    "isort>=5.12.0",
+    "flake8>=6.1.0",
+    "mypy>=1.7.1",
+    "pre-commit>=3.6.0",
+    
+    # 文档生成
+    "mkdocs>=1.5.3",
+    "mkdocs-material>=9.4.8",
+    "mkdocstrings[python]>=0.24.0",
+]
+
+test = [
+    "pytest>=7.4.3",
+    "pytest-asyncio>=0.21.1",
+    "pytest-cov>=4.1.0",
+    "pytest-mock>=3.12.0",
+    "httpx>=0.25.2",
+]
+
+production = [
+    # 生产环境优化
+    "gunicorn>=21.2.0",
+    "redis>=5.0.1",  # 可选缓存
+]
+
+# 性能优化相关工具
+performance = [
+    "py-spy>=0.3.14",      # Python性能分析
+    "memory-profiler>=0.61.0",  # 内存分析
+    "line-profiler>=4.1.0",     # 行级性能分析
+    "guppy3>=3.1.3",           # 内存堆分析
+    "psutil>=5.9.0",           # 系统资源监控
+]
+
+[project.urls]
+Homepage = "https://github.com/kompanion/kompanion-python"
+Repository = "https://github.com/kompanion/kompanion-python.git"
+Documentation = "https://kompanion-python.readthedocs.io/"
+"Bug Tracker" = "https://github.com/kompanion/kompanion-python/issues"
+
+[project.scripts]
+kompanion = "app.main:main"
+
+# 工具配置
+[tool.black]
+line-length = 88
+target-version = ["py312"]
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+  # 排除的目录
+  \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | _build
+  | buck-out
+  | build
+  | dist
+  | migrations
+)/
+'''
+
+[tool.isort]
+profile = "black"
+multi_line_output = 3
+line_length = 88
+known_first_party = ["app", "tests"]
+known_third_party = ["fastapi", "sqlalchemy", "pydantic"]
+
+[tool.mypy]
+python_version = "3.12"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+warn_unreachable = true
+strict_equality = true
+
+[[tool.mypy.overrides]]
+module = [
+    "ebooklib.*",
+    "fitz.*",
+    "PIL.*",
+]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "--strict-config",
+    "--cov=app",
+    "--cov-report=term-missing",
+    "--cov-report=html",
+    "--cov-report=xml",
+]
+testpaths = ["tests"]
+filterwarnings = [
+    "error",
+    "ignore::UserWarning",
+    "ignore::DeprecationWarning",
+]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests",
+    "unit: marks tests as unit tests",
+]
+asyncio_mode = "auto"
+
+[tool.coverage.run]
+source = ["app"]
+omit = [
+    "*/migrations/*",
+    "*/tests/*",
+    "*/venv/*",
+    "*/__pycache__/*",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "if self.debug:",
+    "if settings.DEBUG",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if 0:",
+    "if __name__ == .__main__.:",
+    "class .*\\bProtocol\\):",
+    "@(abc\\.)?abstractmethod",
+]
+
+[tool.flake8]
+max-line-length = 88
+extend-ignore = ["E203", "E501", "W503"]
+exclude = [
+    ".git",
+    "__pycache__",
+    "migrations",
+    ".venv",
+    "build",
+    "dist",
+]
+
+# uv配置
+[tool.uv]
+dev-dependencies = [
+    "pytest>=7.4.3",
+    "pytest-asyncio>=0.21.1",
+    "pytest-cov>=4.1.0",
+    "pytest-mock>=3.12.0",
+    "black>=23.11.0",
+    "isort>=5.12.0",
+    "flake8>=6.1.0",
+    "mypy>=1.7.1",
+] 

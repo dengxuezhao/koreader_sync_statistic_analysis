@@ -1,0 +1,257 @@
+{% extends "base.html" %}
+
+{% block content %}
+<!-- 统计卡片行 -->
+<div class="row mb-4">
+    <div class="col-md-3 mb-3">
+        <div class="card stat-card primary">
+            <div class="card-body text-center">
+                <i class="bi bi-people fs-1 mb-2"></i>
+                <h3 class="mb-1">{{ stats.users.total }}</h3>
+                <p class="mb-0">总用户数</p>
+                <small class="opacity-75">{{ stats.users.active }} 活跃用户</small>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-3 mb-3">
+        <div class="card stat-card success">
+            <div class="card-body text-center">
+                <i class="bi bi-book fs-1 mb-2"></i>
+                <h3 class="mb-1">{{ stats.books.total }}</h3>
+                <p class="mb-0">书籍总数</p>
+                <small class="opacity-75">{{ stats.books.recent_uploads }} 本新上传</small>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-3 mb-3">
+        <div class="card stat-card warning">
+            <div class="card-body text-center">
+                <i class="bi bi-phone fs-1 mb-2"></i>
+                <h3 class="mb-1">{{ stats.devices.total }}</h3>
+                <p class="mb-0">设备总数</p>
+                <small class="opacity-75">KOReader设备</small>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-3 mb-3">
+        <div class="card stat-card">
+            <div class="card-body text-center">
+                <i class="bi bi-download fs-1 mb-2"></i>
+                <h3 class="mb-1">{{ stats.activity.total_downloads }}</h3>
+                <p class="mb-0">总下载次数</p>
+                <small class="opacity-75">{{ stats.activity.total_syncs }} 次同步</small>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 图表和活动 -->
+<div class="row">
+    <!-- 最新书籍 -->
+    <div class="col-lg-6 mb-4">
+        <div class="card table-card">
+            <div class="card-header bg-white">
+                <h5 class="mb-0">
+                    <i class="bi bi-book me-2"></i>最新上传书籍
+                </h5>
+            </div>
+            <div class="card-body p-0">
+                {% if activities.books %}
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <tbody>
+                            {% for book in activities.books %}
+                            <tr>
+                                <td>
+                                    <div class="d-flex align-items-center">
+                                        <div class="avatar bg-primary text-white rounded me-3">
+                                            <i class="bi bi-book"></i>
+                                        </div>
+                                        <div>
+                                            <div class="fw-bold">{{ book.title[:30] }}{% if book.title|length > 30 %}...{% endif %}</div>
+                                            <small class="text-muted">{{ book.author or '未知作者' }}</small>
+                                        </div>
+                                    </div>
+                                </td>
+                                <td class="text-end">
+                                    <div class="badge bg-primary">{{ book.file_format.upper() }}</div>
+                                    <small class="text-muted d-block">{{ book.file_size_mb }} MB</small>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div class="text-center py-4 text-muted">
+                    <i class="bi bi-inbox fs-1 mb-2"></i>
+                    <p>暂无书籍</p>
+                </div>
+                {% endif %}
+                
+                <div class="card-footer bg-light">
+                    <a href="/api/v1/web/books" class="btn btn-outline-primary btn-sm">
+                        查看所有书籍 <i class="bi bi-arrow-right"></i>
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 最新用户 -->
+    <div class="col-lg-6 mb-4">
+        <div class="card table-card">
+            <div class="card-header bg-white">
+                <h5 class="mb-0">
+                    <i class="bi bi-people me-2"></i>最新注册用户
+                </h5>
+            </div>
+            <div class="card-body p-0">
+                {% if activities.users %}
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <tbody>
+                            {% for user_item in activities.users %}
+                            <tr>
+                                <td>
+                                    <div class="d-flex align-items-center">
+                                        <div class="avatar bg-success text-white rounded me-3">
+                                            <i class="bi bi-person"></i>
+                                        </div>
+                                        <div>
+                                            <div class="fw-bold">{{ user_item.username }}</div>
+                                            <small class="text-muted">{{ user_item.email or '无邮箱' }}</small>
+                                        </div>
+                                    </div>
+                                </td>
+                                <td class="text-end">
+                                    {% if user_item.is_admin %}
+                                    <span class="badge bg-danger">管理员</span>
+                                    {% else %}
+                                    <span class="badge bg-secondary">用户</span>
+                                    {% endif %}
+                                    <small class="text-muted d-block">{{ user_item.device_count }} 设备</small>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div class="text-center py-4 text-muted">
+                    <i class="bi bi-people fs-1 mb-2"></i>
+                    <p>暂无用户</p>
+                </div>
+                {% endif %}
+                
+                {% if user.is_admin %}
+                <div class="card-footer bg-light">
+                    <a href="/api/v1/web/users" class="btn btn-outline-success btn-sm">
+                        查看所有用户 <i class="bi bi-arrow-right"></i>
+                    </a>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 阅读统计 -->
+<div class="row">
+    <div class="col-12">
+        <div class="card table-card">
+            <div class="card-header bg-white">
+                <h5 class="mb-0">
+                    <i class="bi bi-graph-up me-2"></i>最新阅读统计
+                </h5>
+            </div>
+            <div class="card-body p-0">
+                {% if activities.reading_stats %}
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>书籍</th>
+                                <th>设备</th>
+                                <th>阅读进度</th>
+                                <th>阅读时间</th>
+                                <th>最后更新</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for stat in activities.reading_stats %}
+                            <tr>
+                                <td>
+                                    <div class="fw-bold">{{ (stat.book_title or '未知书籍')[:40] }}{% if stat.book_title and stat.book_title|length > 40 %}...{% endif %}</div>
+                                    <small class="text-muted">{{ stat.book_author or '未知作者' }}</small>
+                                </td>
+                                <td>
+                                    <span class="badge bg-info">{{ stat.device_name or '未知设备' }}</span>
+                                </td>
+                                <td>
+                                    <div class="progress" style="height: 8px;">
+                                        <div class="progress-bar" role="progressbar" 
+                                             style="width: {{ stat.reading_progress }}%"
+                                             aria-valuenow="{{ stat.reading_progress }}" 
+                                             aria-valuemin="0" aria-valuemax="100">
+                                        </div>
+                                    </div>
+                                    <small class="text-muted">{{ "%.1f"|format(stat.reading_progress) }}%</small>
+                                </td>
+                                <td>
+                                    <div class="fw-bold">{{ stat.reading_time_formatted }}</div>
+                                    <small class="text-muted">{{ stat.completion_status }}</small>
+                                </td>
+                                <td>
+                                    <small class="text-muted">
+                                        {% if stat.updated_at %}
+                                        {{ stat.updated_at.strftime('%m-%d %H:%M') }}
+                                        {% else %}
+                                        未知时间
+                                        {% endif %}
+                                    </small>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div class="text-center py-4 text-muted">
+                    <i class="bi bi-graph-up fs-1 mb-2"></i>
+                    <p>暂无阅读统计</p>
+                </div>
+                {% endif %}
+                
+                <div class="card-footer bg-light">
+                    <a href="/api/v1/web/statistics" class="btn btn-outline-info btn-sm">
+                        查看详细统计 <i class="bi bi-arrow-right"></i>
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+.avatar {
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.2rem;
+}
+
+.progress {
+    border-radius: 10px;
+}
+
+.table td {
+    vertical-align: middle;
+}
+</style>
+{% endblock %} 

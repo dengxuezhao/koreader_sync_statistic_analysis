@@ -1,0 +1,466 @@
+{% extends "base.html" %}
+
+{% block content %}
+<!-- 搜索和过滤 -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-body">
+                <form method="GET" class="row g-3">
+                    <div class="col-md-4">
+                        <label for="search" class="form-label">搜索书籍</label>
+                        <input type="text" class="form-control" id="search" name="search" 
+                               value="{{ search or '' }}" placeholder="书名、作者或出版社">
+                    </div>
+                    <div class="col-md-3">
+                        <label for="format_filter" class="form-label">文件格式</label>
+                        <select class="form-select" id="format_filter" name="format_filter">
+                            <option value="">所有格式</option>
+                            {% for format_name, count in available_formats.items() %}
+                            <option value="{{ format_name }}" {{ 'selected' if format_filter == format_name else '' }}>
+                                {{ format_name.upper() }} ({{ count }})
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">&nbsp;</label>
+                        <div class="d-flex gap-2">
+                            <button type="submit" class="btn btn-primary">
+                                <i class="bi bi-search"></i> 搜索
+                            </button>
+                            <a href="/api/v1/web/books" class="btn btn-outline-secondary">
+                                <i class="bi bi-arrow-clockwise"></i> 重置
+                            </a>
+                        </div>
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label">&nbsp;</label>
+                        <div class="d-grid">
+                            <button type="button" class="btn btn-success" data-bs-toggle="modal" data-bs-target="#uploadModal">
+                                <i class="bi bi-upload"></i> 上传书籍
+                            </button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 书籍统计 -->
+<div class="row mb-3">
+    <div class="col-12">
+        <div class="d-flex justify-content-between align-items-center">
+            <div>
+                <h5 class="mb-0">
+                    <i class="bi bi-book me-2"></i>
+                    找到 {{ total_books }} 本书籍
+                    {% if search %}（搜索："{{ search }}"）{% endif %}
+                    {% if format_filter %}（格式：{{ format_filter.upper() }}）{% endif %}
+                </h5>
+            </div>
+            <div>
+                <!-- 分页信息 -->
+                <small class="text-muted">
+                    第 {{ page }} 页，共 {{ total_pages }} 页
+                </small>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 书籍列表 -->
+<div class="row">
+    {% if books %}
+    {% for book in books %}
+    <div class="col-xl-3 col-lg-4 col-md-6 mb-4">
+        <div class="card h-100 book-card">
+            <div class="card-img-top-container">
+                {% if book.has_cover %}
+                <img src="/api/v1/books/{{ book.id }}/cover?thumbnail=true" 
+                     class="card-img-top" alt="{{ book.title }}" 
+                     style="height: 200px; object-fit: cover;">
+                {% else %}
+                <div class="card-img-placeholder">
+                    <i class="bi bi-book fs-1 text-muted"></i>
+                </div>
+                {% endif %}
+                <div class="format-badge">
+                    {{ book.file_format.upper() }}
+                </div>
+            </div>
+            
+            <div class="card-body d-flex flex-column">
+                <h6 class="card-title">{{ book.title[:50] }}{% if book.title|length > 50 %}...{% endif %}</h6>
+                <p class="card-text text-muted small">
+                    <i class="bi bi-person me-1"></i>{{ book.author or '未知作者' }}
+                </p>
+                {% if book.publisher %}
+                <p class="card-text text-muted small">
+                    <i class="bi bi-building me-1"></i>{{ book.publisher }}
+                </p>
+                {% endif %}
+                
+                <div class="mt-auto">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <small class="text-muted">
+                            <i class="bi bi-hdd me-1"></i>{{ book.file_size_mb }} MB
+                        </small>
+                        <small class="text-muted">
+                            <i class="bi bi-download me-1"></i>{{ book.download_count }}
+                        </small>
+                    </div>
+                    
+                    <div class="btn-group w-100">
+                        <a href="/api/v1/books/{{ book.id }}/download" 
+                           class="btn btn-primary btn-sm">
+                            <i class="bi bi-download"></i> 下载
+                        </a>
+                        <button type="button" class="btn btn-outline-info btn-sm" 
+                                data-bs-toggle="modal" data-bs-target="#bookModal{{ book.id }}">
+                            <i class="bi bi-info-circle"></i> 详情
+                        </button>
+                        {% if user.is_admin %}
+                        <button type="button" class="btn btn-outline-danger btn-sm"
+                                onclick="deleteBook({{ book.id }}, '{{ book.title }}')">
+                            <i class="bi bi-trash"></i>
+                        </button>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 书籍详情模态框 -->
+    <div class="modal fade" id="bookModal{{ book.id }}" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">{{ book.title }}</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row">
+                        <div class="col-md-4 text-center">
+                            {% if book.has_cover %}
+                            <img src="/api/v1/books/{{ book.id }}/cover" 
+                                 class="img-fluid rounded" alt="{{ book.title }}"
+                                 style="max-height: 300px;">
+                            {% else %}
+                            <div class="cover-placeholder rounded">
+                                <i class="bi bi-book fs-1 text-muted"></i>
+                            </div>
+                            {% endif %}
+                        </div>
+                        <div class="col-md-8">
+                            <table class="table table-borderless">
+                                <tr>
+                                    <td><strong>作者：</strong></td>
+                                    <td>{{ book.author or '未知' }}</td>
+                                </tr>
+                                <tr>
+                                    <td><strong>ISBN：</strong></td>
+                                    <td>{{ book.isbn or '无' }}</td>
+                                </tr>
+                                <tr>
+                                    <td><strong>出版社：</strong></td>
+                                    <td>{{ book.publisher or '未知' }}</td>
+                                </tr>
+                                <tr>
+                                    <td><strong>语言：</strong></td>
+                                    <td>{{ book.language or '未知' }}</td>
+                                </tr>
+                                <tr>
+                                    <td><strong>格式：</strong></td>
+                                    <td>{{ book.file_format.upper() }}</td>
+                                </tr>
+                                <tr>
+                                    <td><strong>文件大小：</strong></td>
+                                    <td>{{ book.file_size_mb }} MB</td>
+                                </tr>
+                                <tr>
+                                    <td><strong>下载次数：</strong></td>
+                                    <td>{{ book.download_count }}</td>
+                                </tr>
+                                <tr>
+                                    <td><strong>上传时间：</strong></td>
+                                    <td>{{ book.created_at.strftime('%Y-%m-%d %H:%M:%S') if book.created_at else '未知' }}</td>
+                                </tr>
+                            </table>
+                            
+                            {% if book.description %}
+                            <div class="mt-3">
+                                <strong>简介：</strong>
+                                <p class="mt-2">{{ book.description }}</p>
+                            </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <a href="/api/v1/books/{{ book.id }}/download" 
+                       class="btn btn-primary">
+                        <i class="bi bi-download"></i> 下载书籍
+                    </a>
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                        关闭
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+    {% else %}
+    <div class="col-12">
+        <div class="text-center py-5">
+            <i class="bi bi-inbox fs-1 text-muted mb-3"></i>
+            <h5 class="text-muted">暂无书籍</h5>
+            <p class="text-muted">
+                {% if search or format_filter %}
+                没有找到符合条件的书籍，请尝试其他搜索条件。
+                {% else %}
+                还没有上传任何书籍。
+                {% endif %}
+            </p>
+            <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#uploadModal">
+                <i class="bi bi-upload"></i> 上传第一本书
+            </button>
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+<!-- 分页 -->
+{% if total_pages > 1 %}
+<div class="row mt-4">
+    <div class="col-12 d-flex justify-content-center">
+        <nav>
+            <ul class="pagination">
+                <!-- 上一页 -->
+                {% if page > 1 %}
+                <li class="page-item">
+                    <a class="page-link" href="?page={{ page - 1 }}{% if search %}&search={{ search }}{% endif %}{% if format_filter %}&format_filter={{ format_filter }}{% endif %}">
+                        <i class="bi bi-chevron-left"></i>
+                    </a>
+                </li>
+                {% else %}
+                <li class="page-item disabled">
+                    <span class="page-link"><i class="bi bi-chevron-left"></i></span>
+                </li>
+                {% endif %}
+                
+                <!-- 页码 -->
+                {% for p in range(1, total_pages + 1) %}
+                {% if p == page %}
+                <li class="page-item active">
+                    <span class="page-link">{{ p }}</span>
+                </li>
+                {% elif (p <= 3) or (p >= total_pages - 2) or (p >= page - 2 and p <= page + 2) %}
+                <li class="page-item">
+                    <a class="page-link" href="?page={{ p }}{% if search %}&search={{ search }}{% endif %}{% if format_filter %}&format_filter={{ format_filter }}{% endif %}">{{ p }}</a>
+                </li>
+                {% elif p == 4 and page > 6 %}
+                <li class="page-item disabled">
+                    <span class="page-link">...</span>
+                </li>
+                {% elif p == total_pages - 3 and page < total_pages - 5 %}
+                <li class="page-item disabled">
+                    <span class="page-link">...</span>
+                </li>
+                {% endif %}
+                {% endfor %}
+                
+                <!-- 下一页 -->
+                {% if page < total_pages %}
+                <li class="page-item">
+                    <a class="page-link" href="?page={{ page + 1 }}{% if search %}&search={{ search }}{% endif %}{% if format_filter %}&format_filter={{ format_filter }}{% endif %}">
+                        <i class="bi bi-chevron-right"></i>
+                    </a>
+                </li>
+                {% else %}
+                <li class="page-item disabled">
+                    <span class="page-link"><i class="bi bi-chevron-right"></i></span>
+                </li>
+                {% endif %}
+            </ul>
+        </nav>
+    </div>
+</div>
+{% endif %}
+
+<!-- 上传书籍模态框 -->
+<div class="modal fade" id="uploadModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">上传书籍</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form id="uploadForm" enctype="multipart/form-data">
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="bookFile" class="form-label">选择书籍文件</label>
+                        <input type="file" class="form-control" id="bookFile" name="file" 
+                               accept=".epub,.pdf,.mobi,.azw,.azw3,.fb2,.txt,.rtf" required>
+                        <div class="form-text">
+                            支持格式：EPUB, PDF, MOBI, AZW, AZW3, FB2, TXT, RTF
+                        </div>
+                    </div>
+                    
+                    <div class="progress" id="uploadProgress" style="display: none;">
+                        <div class="progress-bar" role="progressbar" style="width: 0%"></div>
+                    </div>
+                    
+                    <div id="uploadResult" style="display: none;"></div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                        取消
+                    </button>
+                    <button type="submit" class="btn btn-primary" id="uploadBtn">
+                        <i class="bi bi-upload"></i> 上传
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<style>
+.book-card {
+    transition: transform 0.2s ease;
+}
+
+.book-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 5px 20px rgba(0,0,0,0.15) !important;
+}
+
+.card-img-top-container {
+    position: relative;
+    overflow: hidden;
+}
+
+.card-img-placeholder {
+    height: 200px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: #f8f9fa;
+}
+
+.format-badge {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    background: rgba(0,0,0,0.7);
+    color: white;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 0.75rem;
+    font-weight: bold;
+}
+
+.cover-placeholder {
+    height: 300px;
+    background-color: #f8f9fa;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+</style>
+
+{% block scripts %}
+<script>
+// 删除书籍
+function deleteBook(bookId, bookTitle) {
+    if (confirm(`确定要删除书籍"${bookTitle}"吗？此操作不可恢复。`)) {
+        fetch(`/api/v1/books/${bookId}`, {
+            method: 'DELETE',
+            headers: {
+                'Authorization': 'Bearer ' + localStorage.getItem('token')
+            }
+        })
+        .then(response => {
+            if (response.ok) {
+                location.reload();
+            } else {
+                alert('删除失败，请重试。');
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('删除失败，请重试。');
+        });
+    }
+}
+
+// 上传书籍
+document.getElementById('uploadForm').addEventListener('submit', function(e) {
+    e.preventDefault();
+    
+    const formData = new FormData();
+    const fileInput = document.getElementById('bookFile');
+    const file = fileInput.files[0];
+    
+    if (!file) {
+        alert('请选择要上传的文件');
+        return;
+    }
+    
+    formData.append('file', file);
+    
+    const uploadBtn = document.getElementById('uploadBtn');
+    const progressContainer = document.getElementById('uploadProgress');
+    const progressBar = progressContainer.querySelector('.progress-bar');
+    const resultContainer = document.getElementById('uploadResult');
+    
+    uploadBtn.disabled = true;
+    uploadBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status"></span> 上传中...';
+    progressContainer.style.display = 'block';
+    resultContainer.style.display = 'none';
+    
+    const xhr = new XMLHttpRequest();
+    
+    xhr.upload.addEventListener('progress', function(e) {
+        if (e.lengthComputable) {
+            const percentComplete = (e.loaded / e.total) * 100;
+            progressBar.style.width = percentComplete + '%';
+            progressBar.textContent = Math.round(percentComplete) + '%';
+        }
+    });
+    
+    xhr.onload = function() {
+        uploadBtn.disabled = false;
+        uploadBtn.innerHTML = '<i class="bi bi-upload"></i> 上传';
+        progressContainer.style.display = 'none';
+        
+        if (xhr.status === 201) {
+            resultContainer.innerHTML = '<div class="alert alert-success">书籍上传成功！</div>';
+            resultContainer.style.display = 'block';
+            setTimeout(() => {
+                location.reload();
+            }, 1500);
+        } else {
+            const errorMsg = '上传失败，请重试。';
+            resultContainer.innerHTML = `<div class="alert alert-danger">${errorMsg}</div>`;
+            resultContainer.style.display = 'block';
+        }
+    };
+    
+    xhr.onerror = function() {
+        uploadBtn.disabled = false;
+        uploadBtn.innerHTML = '<i class="bi bi-upload"></i> 上传';
+        progressContainer.style.display = 'none';
+        resultContainer.innerHTML = '<div class="alert alert-danger">网络错误，请重试。</div>';
+        resultContainer.style.display = 'block';
+    };
+    
+    xhr.open('POST', '/api/v1/books/upload');
+    xhr.send(formData);
+});
+</script>
+{% endblock %}
+{% endblock %} 
