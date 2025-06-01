@@ -39,7 +39,7 @@ from sqlalchemy import select, func, text
 
 from app.core.database import async_session_maker, engine, Base
 from app.core.config import settings
-from app.core.security import get_password_hash
+from app.core.security import hash_password_md5
 from app.models import User, Device, Book, SyncProgress, ReadingStatistics
 
 
@@ -158,7 +158,7 @@ class UserManager:
             user = User(
                 username=username,
                 email=email,
-                hashed_password=get_password_hash(password),
+                password_hash=hash_password_md5(password),
                 is_active=True,
                 is_admin=is_admin
             )

@@ -9,9 +9,6 @@ from functools import wraps
 import asyncio
 import logging
 
-import redis.asyncio as redis
-from redis.asyncio import Redis
-
 from .config import settings
 
 logger = logging.getLogger(__name__)
@@ -20,8 +17,9 @@ class CacheManager:
     """缓存管理器"""
     
     def __init__(self):
-        self.redis_client: Optional[Redis] = None
+        self.redis_client: Optional[Any] = None
         self.enabled = settings.ENABLE_REDIS_CACHE
+        self._connection_failed = False
         
     async def init(self):
         """初始化Redis连接"""
@@ -30,29 +28,41 @@ class CacheManager:
             return
             
         try:
+            # 延迟导入redis，避免未安装时出错
+            import redis.asyncio as redis
+            
             self.redis_client = redis.from_url(
                 settings.REDIS_URL,
                 encoding="utf-8",
                 decode_responses=True,
-                socket_timeout=5,
-                socket_connect_timeout=5,
-                retry_on_timeout=True,
+                socket_timeout=3,
+                socket_connect_timeout=3,
+                retry_on_timeout=False,
                 max_connections=20
             )
             
             # 测试连接
             await self.redis_client.ping()
             logger.info("Redis缓存连接成功")
+            self._connection_failed = False
             
-        except Exception as e:
-            logger.error(f"Redis连接失败: {e}")
+        except ImportError:
+            logger.warning("Redis未安装，禁用缓存功能")
             self.enabled = False
             self.redis_client = None
+        except Exception as e:
+            logger.warning(f"Redis连接失败，继续运行但禁用缓存: {e}")
+            self.enabled = False
+            self.redis_client = None
+            self._connection_failed = True
     
     async def close(self):
         """关闭Redis连接"""
         if self.redis_client:
-            await self.redis_client.close()
+            try:
+                await self.redis_client.close()
+            except Exception as e:
+                logger.warning(f"关闭Redis连接时出错: {e}")
     
     def _generate_key(self, prefix: str, *args, **kwargs) -> str:
         """生成缓存键"""
@@ -73,7 +83,7 @@ class CacheManager:
                     # 尝试pickle反序列化
                     return pickle.loads(data.encode('latin1'))
         except Exception as e:
-            logger.warning(f"缓存获取失败 {key}: {e}")
+            logger.debug(f"缓存获取失败 {key}: {e}")
         return None
     
     async def set(self, key: str, value: Any, ttl: int = None) -> bool:
@@ -95,7 +105,7 @@ class CacheManager:
             return True
             
         except Exception as e:
-            logger.warning(f"缓存设置失败 {key}: {e}")
+            logger.debug(f"缓存设置失败 {key}: {e}")
             return False
     
     async def delete(self, key: str) -> bool:
@@ -107,7 +117,7 @@ class CacheManager:
             await self.redis_client.delete(key)
             return True
         except Exception as e:
-            logger.warning(f"缓存删除失败 {key}: {e}")
+            logger.debug(f"缓存删除失败 {key}: {e}")
             return False
     
     async def clear_pattern(self, pattern: str) -> int:
@@ -121,13 +131,19 @@ class CacheManager:
                 deleted = await self.redis_client.delete(*keys)
                 return deleted
         except Exception as e:
-            logger.warning(f"批量删除缓存失败 {pattern}: {e}")
+            logger.debug(f"批量删除缓存失败 {pattern}: {e}")
         return 0
     
     async def get_stats(self) -> dict:
         """获取缓存统计信息"""
-        if not self.enabled or not self.redis_client:
-            return {"enabled": False}
+        if not self.enabled:
+            return {"enabled": False, "reason": "disabled"}
+        
+        if self._connection_failed:
+            return {"enabled": False, "reason": "connection_failed"}
+            
+        if not self.redis_client:
+            return {"enabled": False, "reason": "not_connected"}
             
         try:
             info = await self.redis_client.info()
@@ -140,7 +156,7 @@ class CacheManager:
                 "keys_count": await self.redis_client.dbsize(),
             }
         except Exception as e:
-            logger.error(f"获取缓存统计失败: {e}")
+            logger.debug(f"获取缓存统计失败: {e}")
             return {"enabled": True, "error": str(e)}
 
 # 全局缓存管理器实例
@@ -202,7 +218,7 @@ async def invalidate_cache_pattern(pattern: str):
 
 async def warm_cache():
     """缓存预热"""
-    if not settings.ENABLE_CACHE_WARMUP:
+    if not settings.ENABLE_CACHE_WARMUP or not cache_manager.enabled:
         return
     
     logger.info("开始缓存预热...")

@@ -1,0 +1,349 @@
+{% extends "base.html" %}
+
+{% block title %}{{ page_title }} - Kompanion Python{% endblock %}
+
+{% block content %}
+<!-- API文档页面 -->
+
+<!-- API概览 -->
+<div class="row mb-4">
+    <div class="col-md-3 mb-3">
+        <div class="card stat-card primary">
+            <div class="card-body text-center">
+                <i class="bi bi-gear fs-1 mb-2"></i>
+                <h3 class="mb-1">{{ api_endpoints|length }}</h3>
+                <p class="mb-0">API 类别</p>
+                <small class="opacity-75">可用的API组</small>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-3 mb-3">
+        <div class="card stat-card success">
+            <div class="card-body text-center">
+                <i class="bi bi-link fs-1 mb-2"></i>
+                <h3 class="mb-1">{{ api_endpoints.values()|map('length')|sum }}</h3>
+                <p class="mb-0">端点总数</p>
+                <small class="opacity-75">可调用接口</small>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-3 mb-3">
+        <div class="card stat-card warning">
+            <div class="card-body text-center">
+                <i class="bi bi-shield fs-1 mb-2"></i>
+                <h3 class="mb-1">JWT</h3>
+                <p class="mb-0">认证方式</p>
+                <small class="opacity-75">Bearer Token</small>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-3 mb-3">
+        <a href="/docs" target="_blank" class="text-decoration-none">
+            <div class="card stat-card" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; cursor: pointer; transition: transform 0.3s ease;">
+                <div class="card-body text-center">
+                    <i class="bi bi-code-square fs-1 mb-2"></i>
+                    <h3 class="mb-1">Swagger</h3>
+                    <p class="mb-0">交互式文档</p>
+                    <small class="opacity-75">点击访问</small>
+                </div>
+            </div>
+        </a>
+    </div>
+</div>
+
+<!-- API文档内容 -->
+<div class="row">
+    <!-- API端点列表 -->
+    <div class="col-lg-8">
+        {% for category, endpoints in api_endpoints.items() %}
+        <div class="card mb-4">
+            <div class="card-header bg-white">
+                <h5 class="mb-0">
+                    <i class="bi bi-{{ 'shield-lock' if category == '认证API' else 'arrow-repeat' if category == '同步API' else 'book' if category == 'OPDS目录' else 'cloud-upload' if category == '书籍管理' else 'folder' }} me-2"></i>
+                    {{ category }}
+                </h5>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th style="width: 80px;">方法</th>
+                                <th>端点路径</th>
+                                <th>描述</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for endpoint in endpoints %}
+                            <tr>
+                                <td>
+                                    <span class="badge bg-{{ 'primary' if endpoint.method == 'GET' else 'success' if endpoint.method == 'POST' else 'warning' if endpoint.method == 'PUT' else 'danger' if endpoint.method == 'DELETE' else 'info' }}">
+                                        {{ endpoint.method }}
+                                    </span>
+                                </td>
+                                <td>
+                                    <code class="text-primary">{{ endpoint.path }}</code>
+                                </td>
+                                <td>
+                                    {{ endpoint.description }}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    
+    <!-- API使用指南 -->
+    <div class="col-lg-4">
+        <div class="card sticky-top">
+            <div class="card-header bg-white">
+                <h5 class="mb-0">
+                    <i class="bi bi-lightbulb me-2"></i>使用指南
+                </h5>
+            </div>
+            <div class="card-body">
+                <h6 class="text-primary">
+                    <i class="bi bi-1-circle me-2"></i>认证流程
+                </h6>
+                <p class="small text-muted mb-3">
+                    首先调用登录接口获取JWT token，然后在请求头中添加：<br>
+                    <code>Authorization: Bearer &lt;token&gt;</code>
+                </p>
+                
+                <h6 class="text-primary">
+                    <i class="bi bi-2-circle me-2"></i>数据格式
+                </h6>
+                <p class="small text-muted mb-3">
+                    API使用JSON格式进行数据交换，请求头需要设置：<br>
+                    <code>Content-Type: application/json</code>
+                </p>
+                
+                <h6 class="text-primary">
+                    <i class="bi bi-3-circle me-2"></i>响应状态码
+                </h6>
+                <ul class="small text-muted mb-3">
+                    <li><code>200</code> - 请求成功</li>
+                    <li><code>201</code> - 资源创建成功</li>
+                    <li><code>400</code> - 请求参数错误</li>
+                    <li><code>401</code> - 认证失败</li>
+                    <li><code>403</code> - 权限不足</li>
+                    <li><code>404</code> - 资源不存在</li>
+                    <li><code>500</code> - 服务器错误</li>
+                </ul>
+                
+                <h6 class="text-primary">
+                    <i class="bi bi-4-circle me-2"></i>分页参数
+                </h6>
+                <p class="small text-muted mb-3">
+                    列表接口支持分页查询：<br>
+                    <code>?page=1&size=20</code>
+                </p>
+                
+                <h6 class="text-primary">
+                    <i class="bi bi-5-circle me-2"></i>错误处理
+                </h6>
+                <p class="small text-muted mb-3">
+                    API错误响应格式：<br>
+                    <code>{"detail": "错误描述"}</code>
+                </p>
+                
+                <div class="d-grid gap-2">
+                    <a href="/docs" target="_blank" class="btn btn-primary btn-sm">
+                        <i class="bi bi-box-arrow-up-right me-2"></i>
+                        在线API测试
+                    </a>
+                    <a href="/redoc" target="_blank" class="btn btn-outline-primary btn-sm">
+                        <i class="bi bi-file-text me-2"></i>
+                        详细文档 (ReDoc)
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- API示例 -->
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header bg-white">
+                <h5 class="mb-0">
+                    <i class="bi bi-code-slash me-2"></i>API调用示例
+                </h5>
+            </div>
+            <div class="card-body">
+                <!-- 示例标签页 -->
+                <ul class="nav nav-tabs" id="exampleTabs" role="tablist">
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link active" id="login-tab" data-bs-toggle="tab" data-bs-target="#login" type="button" role="tab">
+                            登录认证
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="upload-tab" data-bs-toggle="tab" data-bs-target="#upload" type="button" role="tab">
+                            上传书籍
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="sync-tab" data-bs-toggle="tab" data-bs-target="#sync" type="button" role="tab">
+                            同步进度
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="opds-tab" data-bs-toggle="tab" data-bs-target="#opds" type="button" role="tab">
+                            OPDS目录
+                        </button>
+                    </li>
+                </ul>
+                
+                <!-- 示例内容 -->
+                <div class="tab-content" id="exampleTabsContent">
+                    <!-- 登录示例 -->
+                    <div class="tab-pane fade show active" id="login" role="tabpanel">
+                        <div class="row mt-3">
+                            <div class="col-md-6">
+                                <h6>请求示例</h6>
+                                <pre class="bg-light p-3 rounded"><code>POST /api/v1/auth/login
+Content-Type: application/json
+
+{
+  "username": "admin",
+  "password": "your_password"
+}</code></pre>
+                            </div>
+                            <div class="col-md-6">
+                                <h6>响应示例</h6>
+                                <pre class="bg-light p-3 rounded"><code>{
+  "access_token": "eyJhbGciOiJIUzI1NiIs...",
+  "token_type": "bearer",
+  "expires_in": 3600,
+  "user": {
+    "id": 1,
+    "username": "admin",
+    "is_admin": true
+  }
+}</code></pre>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- 上传示例 -->
+                    <div class="tab-pane fade" id="upload" role="tabpanel">
+                        <div class="row mt-3">
+                            <div class="col-md-6">
+                                <h6>请求示例 (curl)</h6>
+                                <pre class="bg-light p-3 rounded"><code>curl -X POST \
+  http://localhost:8080/api/v1/books/upload \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -F "file=@book.epub" \
+  -F "title=我的书籍" \
+  -F "author=作者名"</code></pre>
+                            </div>
+                            <div class="col-md-6">
+                                <h6>响应示例</h6>
+                                <pre class="bg-light p-3 rounded"><code>{
+  "id": 123,
+  "title": "我的书籍",
+  "author": "作者名",
+  "file_format": "epub",
+  "file_size": 1024000,
+  "has_cover": true,
+  "message": "书籍上传成功"
+}</code></pre>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- 同步示例 -->
+                    <div class="tab-pane fade" id="sync" role="tabpanel">
+                        <div class="row mt-3">
+                            <div class="col-md-6">
+                                <h6>上传进度 (KOSync兼容)</h6>
+                                <pre class="bg-light p-3 rounded"><code>PUT /api/v1/syncs/progress
+Authorization: Bearer YOUR_TOKEN
+Content-Type: application/json
+
+{
+  "document": "book-name.epub",
+  "progress": "0.356",
+  "percentage": 35.6,
+  "device": "KOReader",
+  "device_id": "my-device"
+}</code></pre>
+                            </div>
+                            <div class="col-md-6">
+                                <h6>获取进度</h6>
+                                <pre class="bg-light p-3 rounded"><code>GET /api/v1/syncs/progress/book-name.epub
+Authorization: Bearer YOUR_TOKEN
+
+响应:
+{
+  "document": "book-name.epub",
+  "progress": "0.356",
+  "percentage": 35.6,
+  "device": "KOReader",
+  "timestamp": 1640995200
+}</code></pre>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- OPDS示例 -->
+                    <div class="tab-pane fade" id="opds" role="tabpanel">
+                        <div class="row mt-3">
+                            <div class="col-md-6">
+                                <h6>获取OPDS根目录</h6>
+                                <pre class="bg-light p-3 rounded"><code>GET /api/v1/opds/
+Accept: application/atom+xml
+
+响应: OPDS Atom Feed 格式的目录</code></pre>
+                            </div>
+                            <div class="col-md-6">
+                                <h6>搜索书籍</h6>
+                                <pre class="bg-light p-3 rounded"><code>GET /api/v1/opds/search?q=python
+Accept: application/atom+xml
+
+返回包含"python"关键词的书籍列表</code></pre>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+.sticky-top {
+    top: 20px;
+}
+
+pre {
+    font-size: 0.8rem;
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+code {
+    font-size: 0.8rem;
+}
+
+.nav-tabs .nav-link {
+    color: #6c757d;
+}
+
+.nav-tabs .nav-link.active {
+    color: #495057;
+    background-color: #fff;
+    border-color: #dee2e6 #dee2e6 #fff;
+}
+</style>
+
+{% endblock %} 

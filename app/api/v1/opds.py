@@ -28,9 +28,9 @@ from app.schemas.opds import (
     BookEntry
 )
 from app.core.config import settings
-from app.core.database import get_async_session
+from app.core.database import get_session
 from app.core.cache import cache_opds, invalidate_cache_pattern
-from app.api.deps import get_current_user_optional
+from app.api.deps import get_optional_current_user
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -268,7 +268,7 @@ def book_to_opds_entry(book: Book, request: Request) -> OPDSEntry:
     links = []
     
     # 下载链接
-    if book.file_path:
+    if book.storage_path:
         download_url = f"{base_url}/api/v1/books/{book.id}/download"
         links.append(
             OPDSLink(
@@ -387,16 +387,36 @@ async def opds_root(
         
         return Response(
             content=xml_content,
-            media_type="application/atom+xml;profile=opds-catalog;kind=navigation",
-            headers={"charset": "utf-8"}
+            media_type="application/atom+xml;profile=opds-catalog;kind=navigation;charset=utf-8",
+            headers={
+                "charset": "utf-8"
+            }
         )
-        
+
     except Exception as e:
         logger.error(f"OPDS根目录错误: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="OPDS目录服务暂时不可用"
         )
+
+
+# OPDS根目录HEAD请求支持
+@router.head("/", summary="OPDS根目录 - HEAD请求")
+async def opds_root_head(
+    request: Request,
+    user: OptionalCurrentUser,
+    db: DbSession
+) -> Response:
+    """
+    OPDS目录根端点 - HEAD请求
+    """
+    return Response(
+        media_type="application/atom+xml;profile=opds-catalog;kind=navigation;charset=utf-8",
+        headers={
+            "charset": "utf-8"
+        }
+    )
 
 
 @router.get("/catalog/recent", summary="最新书籍")

@@ -17,15 +17,15 @@
         }
         
         .sidebar {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
             position: fixed;
             top: 0;
             left: 0;
-            width: 250px;
+            height: 100vh;
+            width: 220px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             z-index: 1000;
-            transform: translateX(-100%);
             transition: transform 0.3s ease;
+            overflow-y: auto;
         }
         
         .sidebar.show {
@@ -34,16 +34,26 @@
         
         .sidebar .nav-link {
             color: rgba(255, 255, 255, 0.8);
-            padding: 12px 20px;
-            border-radius: 8px;
-            margin: 4px 12px;
+            padding: 10px 16px;
+            border-radius: 6px;
+            margin: 1px 12px;
             transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            font-size: 0.85rem;
         }
         
         .sidebar .nav-link:hover,
         .sidebar .nav-link.active {
             color: white;
-            background-color: rgba(255, 255, 255, 0.1);
+            background: rgba(255, 255, 255, 0.2);
+            transform: translateX(3px);
+        }
+        
+        .sidebar .nav-link i {
+            width: 18px;
+            margin-right: 8px;
+            font-size: 0.9rem;
         }
         
         .main-content {
@@ -59,7 +69,7 @@
             }
             
             .main-content {
-                margin-left: 250px;
+                margin-left: 220px;
             }
             
             .sidebar-toggle {

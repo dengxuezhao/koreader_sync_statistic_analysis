@@ -95,8 +95,10 @@ class WebService:
             },
             "activity": {
                 "total_downloads": total_downloads,
-                "total_syncs": total_syncs,
-                "total_reading_stats": total_reading_stats
+                "total_syncs": total_syncs
+            },
+            "reading_stats": {
+                "total": total_reading_stats
             }
         }
     
@@ -136,11 +138,80 @@ class WebService:
         }
 
 
-# 根页面重定向到仪表板
+# 根页面重定向到登录页面
 @router.get("/", response_class=RedirectResponse)
 async def web_root():
-    """重定向到仪表板"""
-    return RedirectResponse(url="/api/v1/web/dashboard", status_code=302)
+    """重定向到登录页面"""
+    return RedirectResponse(url="/api/v1/web/login", status_code=302)
+
+
+# 登录页面
+@router.get("/login", response_class=HTMLResponse, summary="登录页面")
+async def login_page(
+    request: Request,
+    message: Optional[str] = Query(None, description="提示信息")
+):
+    """
+    登录页面 - 无需认证即可访问
+    """
+    try:
+        context = {
+            "request": request,
+            "page_title": "用户登录",
+            "message": message
+        }
+        
+        return templates.TemplateResponse("login.html", context)
+        
+    except Exception as e:
+        logger.error(f"登录页面加载失败: {e}")
+        # 返回简单的HTML登录表单
+        login_html = """
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Kompanion 登录</title>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <style>
+                body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background: #f5f5f5; }
+                .container { max-width: 400px; margin: 100px auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+                h1 { text-align: center; color: #333; margin-bottom: 30px; }
+                .form-group { margin-bottom: 20px; }
+                label { display: block; margin-bottom: 5px; color: #555; }
+                input { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }
+                button { width: 100%; padding: 12px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; }
+                button:hover { background: #0056b3; }
+                .links { text-align: center; margin-top: 20px; }
+                .links a { color: #007bff; text-decoration: none; margin: 0 10px; }
+                .message { padding: 10px; margin-bottom: 20px; border-radius: 4px; background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <h1>Kompanion 图书管理系统</h1>
+                """ + (f'<div class="message">{message}</div>' if message else '') + """
+                <form action="/api/v1/auth/form-login" method="post">
+                    <div class="form-group">
+                        <label for="username">用户名:</label>
+                        <input type="text" id="username" name="username" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="password">密码:</label>
+                        <input type="password" id="password" name="password" required>
+                    </div>
+                    <button type="submit">登录</button>
+                </form>
+                <div class="links">
+                    <a href="/api/v1/opds/">OPDS目录</a>
+                    <a href="/docs">API文档</a>
+                    <a href="/health">系统状态</a>
+                </div>
+            </div>
+        </body>
+        </html>
+        """
+        return HTMLResponse(content=login_html)
 
 
 # 仪表板页面
@@ -154,26 +225,74 @@ async def dashboard(
     管理仪表板 - 显示系统概览和统计信息
     """
     try:
-        # 获取统计数据
-        stats = await WebService.get_dashboard_stats(db)
-        activities = await WebService.get_recent_activities(db, limit=5)
+        logger.info(f"用户 {current_user.username} 访问仪表板")
         
+        # 获取统计数据
+        logger.debug("正在获取统计数据...")
+        stats = await WebService.get_dashboard_stats(db)
+        logger.debug(f"统计数据获取成功: {stats}")
+        
+        # 获取最近活动
+        logger.debug("正在获取最近活动...")
+        activities = await WebService.get_recent_activities(db)
+        logger.debug(f"活动数据获取成功: keys={list(activities.keys())}")
+        
+        # 为每个用户计算设备数量
+        logger.debug("正在计算设备数量...")
+        user_device_counts = {}
+        for user_item in activities["users"]:
+            devices_count = await db.execute(
+                select(func.count(Device.id)).where(Device.user_id == user_item.id)
+            )
+            device_count = devices_count.scalar_one()
+            user_device_counts[user_item.id] = device_count
+        
+        logger.debug("正在渲染模板...")
         context = {
             "request": request,
             "user": current_user,
+            "page_title": "管理仪表板",
             "stats": stats,
             "activities": activities,
-            "page_title": "管理仪表板"
+            "user_device_counts": user_device_counts,
         }
         
         return templates.TemplateResponse("dashboard.html", context)
         
     except Exception as e:
-        logger.error(f"仪表板加载失败: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="仪表板加载失败"
-        )
+        logger.error(f"仪表板加载失败: {e}", exc_info=True)
+        
+        # 提供一个最基本的仪表板
+        basic_dashboard = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Kompanion 管理仪表板</title>
+            <meta charset="utf-8">
+            <style>
+                body {{ font-family: Arial, sans-serif; margin: 20px; }}
+                .container {{ max-width: 800px; margin: 0 auto; }}
+                .error {{ background: #f8d7da; padding: 15px; border-radius: 5px; margin: 20px 0; color: #721c24; }}
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <h1>Kompanion 管理仪表板</h1>
+                <p>欢迎，{current_user.username}！</p>
+                <p>用户权限：{"管理员" if current_user.is_admin else "普通用户"}</p>
+                <div class="error">
+                    <strong>模板渲染错误：</strong>{str(e)}<br>
+                    <small>请检查应用日志获取详细信息</small>
+                </div>
+                <p><a href="/api/v1/opds/">访问OPDS目录</a></p>
+                <p><a href="/docs">API文档</a></p>
+                <p><a href="/api/v1/web/statistics">阅读统计</a></p>
+            </div>
+        </body>
+        </html>
+        """
+        
+        return HTMLResponse(content=basic_dashboard)
 
 
 # 用户管理页面
@@ -550,4 +669,141 @@ async def api_documentation(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="API文档页面加载失败"
+        )
+
+
+# JSON API端点 - 专门为Streamlit前端提供数据
+@router.get("/devices/json", summary="获取设备列表(JSON)")
+async def get_devices_json(
+    current_user: CurrentUser,
+    db: DbSession,
+    page: int = Query(default=1, ge=1, description="页码"),
+    size: int = Query(default=20, ge=1, le=100, description="每页大小")
+) -> Any:
+    """
+    获取设备列表JSON数据 - 专门为Streamlit前端提供
+    """
+    try:
+        # 构建查询
+        query = select(Device).options(selectinload(Device.user))
+        
+        # 非管理员只能查看自己的设备
+        if not current_user.is_admin:
+            query = query.where(Device.user_id == current_user.id)
+        
+        # 计算总数
+        count_query = select(func.count(Device.id)).select_from(query.subquery())
+        count_result = await db.execute(count_query)
+        total = count_result.scalar_one()
+        
+        # 分页
+        query = query.order_by(Device.last_sync_at.desc().nullslast())
+        query = query.offset((page - 1) * size).limit(size)
+        
+        result = await db.execute(query)
+        devices = result.scalars().all()
+        
+        # 转换为JSON格式
+        devices_list = []
+        for device in devices:
+            devices_list.append({
+                "id": device.id,
+                "device_name": device.device_name,
+                "device_id": device.device_id,
+                "model": device.model,
+                "firmware_version": device.firmware_version,
+                "app_version": device.app_version,
+                "is_active": device.is_active,
+                "sync_enabled": device.sync_enabled,
+                "last_sync_at": device.last_sync_at.isoformat() if device.last_sync_at else None,
+                "sync_count": device.sync_count,
+                "created_at": device.created_at.isoformat(),
+                "updated_at": device.updated_at.isoformat(),
+                "user_id": device.user_id,
+                "username": device.user.username if device.user else None
+            })
+        
+        return {
+            "total": total,
+            "page": page,
+            "size": size,
+            "devices": devices_list
+        }
+        
+    except Exception as e:
+        logger.error(f"获取设备列表JSON失败: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="获取设备列表失败"
+        )
+
+
+@router.get("/statistics/json", summary="获取阅读统计(JSON)")
+async def get_statistics_json(
+    current_user: CurrentUser,
+    db: DbSession,
+    page: int = Query(default=1, ge=1, description="页码"),
+    size: int = Query(default=20, ge=1, le=100, description="每页大小"),
+    device_filter: Optional[str] = Query(None, description="设备过滤")
+) -> Any:
+    """
+    获取阅读统计JSON数据 - 专门为Streamlit前端提供
+    """
+    try:
+        # 构建查询
+        query = select(ReadingStatistics)
+        
+        # 非管理员只能查看自己的统计
+        if not current_user.is_admin:
+            query = query.where(ReadingStatistics.user_id == current_user.id)
+        
+        if device_filter:
+            query = query.where(ReadingStatistics.device_name.ilike(f"%{device_filter}%"))
+        
+        # 计算总数
+        count_query = select(func.count(ReadingStatistics.id)).select_from(query.subquery())
+        count_result = await db.execute(count_query)
+        total = count_result.scalar_one()
+        
+        # 分页
+        query = query.order_by(ReadingStatistics.updated_at.desc())
+        query = query.offset((page - 1) * size).limit(size)
+        
+        result = await db.execute(query)
+        statistics = result.scalars().all()
+        
+        # 转换为JSON格式
+        statistics_list = []
+        for stat in statistics:
+            statistics_list.append({
+                "id": stat.id,
+                "user_id": stat.user_id,
+                "book_title": stat.book_title,
+                "book_author": stat.book_author,
+                "device_name": stat.device_name,
+                "reading_progress": stat.reading_progress,
+                "completion_status": stat.completion_status,
+                "total_reading_time": stat.total_reading_time,
+                "reading_time_formatted": stat.reading_time_formatted,
+                "current_page": stat.current_page,
+                "total_pages": stat.total_pages,
+                "last_read_time": stat.last_read_time.isoformat() if stat.last_read_time else None,
+                "highlights_count": stat.highlights_count,
+                "notes_count": stat.notes_count,
+                "created_at": stat.created_at.isoformat(),
+                "updated_at": stat.updated_at.isoformat()
+            })
+        
+        return {
+            "total": total,
+            "page": page,
+            "size": size,
+            "statistics": statistics_list
+        }
+        
+    except Exception as e:
+        logger.error(f"获取阅读统计JSON失败: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="获取阅读统计失败"
         ) 

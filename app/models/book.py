@@ -10,7 +10,7 @@ import os
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import Boolean, Column, DateTime, Integer, String, Text, LargeBinary
+from sqlalchemy import Boolean, Column, DateTime, Integer, String, Text, LargeBinary, ForeignKey
 from sqlalchemy.orm import relationship
 
 from app.core.database import Base
@@ -63,6 +63,9 @@ class Book(Base):
     # 时间戳
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # 外键
+    uploaded_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     
     # 关系
     uploaded_by = relationship("User", back_populates="uploaded_books")

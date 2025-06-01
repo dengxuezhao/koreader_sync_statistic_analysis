@@ -7,16 +7,17 @@ KOReader兼容的书籍库管理Web应用程序，使用FastAPI构建。
 import logging
 from contextlib import asynccontextmanager
 import time
+import os
 
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 import uvicorn
 
 from app.core.config import settings
-from app.core.database import init_database, check_database_health, init_db
+from app.core.database import init_database, check_database_health
 from app.core.cache import cache_manager, warm_cache
 from app.api.v1 import api_router, auth, sync, opds, books, webdav, web
 from app.core.security import (
@@ -52,7 +53,7 @@ async def lifespan(app: FastAPI):
             
             # 初始化数据库（如果需要）
             logger.info("初始化数据库...")
-            await init_db()
+            await init_database()
             logger.info("数据库初始化完成")
             
     except Exception as e:
@@ -84,8 +85,23 @@ app = FastAPI(
     description="KOReader兼容的书籍管理和同步服务器",
     version="1.0.0",
     docs_url="/docs",
-    redoc_url="/redoc"
+    redoc_url="/redoc",
+    lifespan=lifespan
 )
+
+# 添加静态文件服务
+try:
+    app.mount("/static", StaticFiles(directory="static"), name="static")
+except RuntimeError:
+    # 如果static目录不存在，创建它
+    os.makedirs("static", exist_ok=True)
+    app.mount("/static", StaticFiles(directory="static"), name="static")
+
+# 根路径重定向到web界面
+@app.get("/", response_class=RedirectResponse)
+async def root():
+    """重定向到web管理界面"""
+    return RedirectResponse(url="/api/v1/web/", status_code=302)
 
 # 信任主机中间件
 app.add_middleware(
@@ -178,6 +194,9 @@ async def security_middleware(request: Request, call_next):
 # 注册API路由
 app.include_router(api_router, prefix="/api/v1")
 
+# 直接WebDAV路由支持（KOReader兼容）
+from app.api.v1 import webdav
+app.include_router(webdav.router, prefix="/webdav", tags=["WebDAV兼容"])
 
 # 健康检查端点
 @app.get("/health", tags=["健康检查"])

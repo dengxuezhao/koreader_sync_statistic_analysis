@@ -1,0 +1,288 @@
+{% extends "base.html" %}
+
+{% block title %}{{ page_title }} - Kompanion Python{% endblock %}
+
+{% block content %}
+<!-- 设备管理页面 -->
+
+<!-- 设备统计概览 -->
+<div class="row mb-4">
+    <div class="col-lg-3 col-md-6 mb-3">
+        <div class="card stat-card primary">
+            <div class="card-body text-center">
+                <i class="bi bi-phone fs-1 mb-2"></i>
+                <h3 class="mb-1">{{ total_devices }}</h3>
+                <p class="mb-0">设备总数</p>
+                <small class="opacity-75">已注册设备</small>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-lg-3 col-md-6 mb-3">
+        <div class="card stat-card success">
+            <div class="card-body text-center">
+                <i class="bi bi-wifi fs-1 mb-2"></i>
+                <h3 class="mb-1">{{ devices|selectattr('last_sync_at')|list|length if devices else 0 }}</h3>
+                <p class="mb-0">已同步设备</p>
+                <small class="opacity-75">有同步记录</small>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-lg-3 col-md-6 mb-3">
+        <div class="card stat-card warning">
+            <div class="card-body text-center">
+                <i class="bi bi-clock fs-1 mb-2"></i>
+                <h3 class="mb-1">{{ devices|selectattr('is_active')|list|length if devices else 0 }}</h3>
+                <p class="mb-0">活跃设备</p>
+                <small class="opacity-75">最近活跃</small>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-lg-3 col-md-6 mb-3">
+        <div class="card stat-card">
+            <div class="card-body text-center">
+                <i class="bi bi-book fs-1 mb-2"></i>
+                <h3 class="mb-1">{{ devices|map(attribute='sync_progress')|map('length')|sum if devices else 0 }}</h3>
+                <p class="mb-0">同步进度</p>
+                <small class="opacity-75">总同步数</small>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 设备列表 -->
+<div class="card table-card">
+    <div class="card-header bg-white d-flex justify-content-between align-items-center">
+        <h5 class="mb-0">
+            <i class="bi bi-phone me-2"></i>设备管理
+        </h5>
+        <span class="badge bg-primary">共 {{ total_devices }} 台设备</span>
+    </div>
+    
+    <div class="card-body p-0">
+        {% if devices %}
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>设备信息</th>
+                        <th>用户</th>
+                        <th>状态</th>
+                        <th>最后同步</th>
+                        <th>同步进度</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for device in devices %}
+                    <tr>
+                        <td>
+                            <div class="d-flex align-items-center">
+                                <div class="device-icon me-3">
+                                    <i class="bi bi-{{ 'tablet' if 'tablet' in device.name.lower() or 'ipad' in device.name.lower() else 'phone' }} fs-4 text-primary"></i>
+                                </div>
+                                <div>
+                                    <div class="fw-bold">{{ device.name }}</div>
+                                    <small class="text-muted">{{ device.device_identifier or '无标识符' }}</small>
+                                </div>
+                            </div>
+                        </td>
+                        <td>
+                            {% if device.user %}
+                            <div class="d-flex align-items-center">
+                                <i class="bi bi-person-circle me-2"></i>
+                                <div>
+                                    <div class="fw-bold">{{ device.user.username }}</div>
+                                    <small class="text-muted">{{ device.user.email or '无邮箱' }}</small>
+                                </div>
+                            </div>
+                            {% else %}
+                            <span class="text-muted">未关联用户</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if device.is_active %}
+                            <span class="badge bg-success">活跃</span>
+                            {% else %}
+                            <span class="badge bg-secondary">非活跃</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if device.last_sync_at %}
+                            <div>
+                                <div class="fw-bold">{{ device.last_sync_at.strftime('%Y-%m-%d') }}</div>
+                                <small class="text-muted">{{ device.last_sync_at.strftime('%H:%M:%S') }}</small>
+                            </div>
+                            {% else %}
+                            <span class="text-muted">从未同步</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if device.sync_progress %}
+                            <div>
+                                <span class="badge bg-info">{{ device.sync_progress|length }} 本书</span>
+                                <div class="progress mt-1" style="height: 4px;">
+                                    {% set avg_progress = (device.sync_progress|map(attribute='percentage')|sum / device.sync_progress|length) if device.sync_progress else 0 %}
+                                    <div class="progress-bar" style="width: {{ avg_progress }}%"></div>
+                                </div>
+                                <small class="text-muted">平均 {{ "%.1f"|format(avg_progress) }}%</small>
+                            </div>
+                            {% else %}
+                            <span class="text-muted">无同步进度</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <div class="btn-group btn-group-sm">
+                                <button class="btn btn-outline-primary" onclick="viewDevice({{ device.id }})">
+                                    <i class="bi bi-eye"></i>
+                                </button>
+                                {% if user.is_admin or device.user_id == user.id %}
+                                <button class="btn btn-outline-warning" onclick="editDevice({{ device.id }})">
+                                    <i class="bi bi-pencil"></i>
+                                </button>
+                                <button class="btn btn-outline-danger" onclick="deleteDevice({{ device.id }})">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                                {% endif %}
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        
+        <!-- 分页 -->
+        {% if total_pages > 1 %}
+        <div class="card-footer bg-light">
+            <nav aria-label="设备分页">
+                <ul class="pagination pagination-sm mb-0 justify-content-center">
+                    {% if page > 1 %}
+                    <li class="page-item">
+                        <a class="page-link" href="?page={{ page - 1 }}">上一页</a>
+                    </li>
+                    {% endif %}
+                    
+                    {% for p in range(1, total_pages + 1) %}
+                    {% if p == page %}
+                    <li class="page-item active">
+                        <span class="page-link">{{ p }}</span>
+                    </li>
+                    {% elif (p <= 3) or (p >= total_pages - 2) or (p >= page - 1 and p <= page + 1) %}
+                    <li class="page-item">
+                        <a class="page-link" href="?page={{ p }}">{{ p }}</a>
+                    </li>
+                    {% elif p == 4 and page > 6 %}
+                    <li class="page-item disabled">
+                        <span class="page-link">...</span>
+                    </li>
+                    {% elif p == total_pages - 3 and page < total_pages - 5 %}
+                    <li class="page-item disabled">
+                        <span class="page-link">...</span>
+                    </li>
+                    {% endif %}
+                    {% endfor %}
+                    
+                    {% if page < total_pages %}
+                    <li class="page-item">
+                        <a class="page-link" href="?page={{ page + 1 }}">下一页</a>
+                    </li>
+                    {% endif %}
+                </ul>
+            </nav>
+        </div>
+        {% endif %}
+        
+        {% else %}
+        <div class="text-center py-5">
+            <i class="bi bi-phone display-1 text-muted"></i>
+            <h5 class="mt-3 text-muted">暂无设备</h5>
+            <p class="text-muted">还没有设备注册到系统中</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- 设备详情模态框 -->
+<div class="modal fade" id="deviceModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">设备详情</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="deviceModalBody">
+                <div class="text-center">
+                    <div class="spinner-border" role="status">
+                        <span class="visually-hidden">加载中...</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+.device-icon {
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.progress {
+    border-radius: 10px;
+}
+
+.table td {
+    vertical-align: middle;
+}
+
+.btn-group-sm > .btn {
+    padding: 0.25rem 0.5rem;
+}
+</style>
+
+<script>
+function viewDevice(deviceId) {
+    // 查看设备详情
+    const modal = new bootstrap.Modal(document.getElementById('deviceModal'));
+    
+    // 显示加载状态
+    document.getElementById('deviceModalBody').innerHTML = `
+        <div class="text-center">
+            <div class="spinner-border" role="status">
+                <span class="visually-hidden">加载中...</span>
+            </div>
+        </div>
+    `;
+    
+    modal.show();
+    
+    // 模拟加载设备详情（实际应该调用API）
+    setTimeout(() => {
+        document.getElementById('deviceModalBody').innerHTML = `
+            <div class="alert alert-info">
+                <i class="bi bi-info-circle me-2"></i>
+                设备详情功能正在开发中，敬请期待！
+            </div>
+        `;
+    }, 1000);
+}
+
+function editDevice(deviceId) {
+    // 编辑设备
+    alert('编辑设备功能正在开发中！');
+}
+
+function deleteDevice(deviceId) {
+    // 删除设备
+    if (confirm('确定要删除这台设备吗？此操作不可恢复。')) {
+        alert('删除设备功能正在开发中！');
+    }
+}
+</script>
+{% endblock %} 

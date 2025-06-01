@@ -8,6 +8,7 @@ WebDAV服务端点
 import logging
 import os
 import json
+import sqlite3
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional, Dict, List
@@ -19,12 +20,19 @@ from fastapi.responses import PlainTextResponse, FileResponse
 from sqlalchemy import select, and_, func
 from sqlalchemy.exc import IntegrityError
 
-from app.api.deps import DbSession, CurrentUser, OptionalCurrentUser
+from app.api.deps import DbSession, CurrentUser, OptionalCurrentUser, WebDAVUser
 from app.core.config import settings
 from app.models import User, Device, Book, ReadingStatistics
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+def serialize_datetime_for_json(obj):
+    """JSON序列化函数，处理datetime对象"""
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+    raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
 
 
 class WebDAVService:
@@ -146,7 +154,11 @@ class WebDAVService:
     def parse_koreader_statistics(file_content: bytes) -> Optional[Dict[str, Any]]:
         """解析KOReader统计文件"""
         try:
-            # KOReader统计文件通常是JSON格式
+            # 首先检查是否是SQLite文件
+            if file_content.startswith(b'SQLite format 3'):
+                return WebDAVService.parse_koreader_sqlite_stats(file_content)
+            
+            # 否则尝试解析为JSON格式
             stats_data = json.loads(file_content.decode('utf-8'))
             
             # 提取关键统计信息
@@ -170,20 +182,129 @@ class WebDAVService:
             logger.warning(f"KOReader统计文件解析失败: {e}")
             return None
 
+    @staticmethod
+    def parse_koreader_sqlite_stats(file_content: bytes) -> Optional[Dict[str, Any]]:
+        """解析KOReader SQLite统计数据库"""
+        try:
+            # 创建临时文件来处理SQLite数据
+            import tempfile
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.sqlite3') as temp_file:
+                temp_file.write(file_content)
+                temp_path = temp_file.name
+            
+            try:
+                conn = sqlite3.connect(temp_path)
+                cursor = conn.cursor()
+                
+                # 查询书籍信息和统计数据
+                # KOReader statistics.sqlite3 结构:
+                # book表: id, title, authors, notes, last_open, highlights, pages, series, language, md5, total_read_time, total_read_pages
+                # page_stat表: id_book, page, start_time, period
+                
+                # 获取所有书籍的统计汇总
+                books_query = """
+                SELECT 
+                    b.title,
+                    b.authors,
+                    b.pages,
+                    b.total_read_time,
+                    b.total_read_pages,
+                    b.last_open,
+                    b.highlights,
+                    b.notes,
+                    COUNT(ps.page) as total_reading_sessions,
+                    MAX(ps.start_time) as last_read_timestamp
+                FROM book b
+                LEFT JOIN page_stat ps ON b.id = ps.id_book
+                GROUP BY b.id, b.title, b.authors
+                ORDER BY b.last_open DESC
+                """
+                
+                cursor.execute(books_query)
+                books = cursor.fetchall()
+                
+                conn.close()
+                
+                # 处理查询结果
+                parsed_books = []
+                for book in books:
+                    title, authors, pages, total_read_time, total_read_pages, last_open, highlights, notes, sessions, last_read_ts = book
+                    
+                    # 计算阅读进度
+                    progress = 0.0
+                    if pages and total_read_pages:
+                        progress = min((total_read_pages / pages) * 100, 100.0)
+                    
+                    # 转换时间戳
+                    last_read_time = None
+                    if last_read_ts:
+                        try:
+                            last_read_time = datetime.fromtimestamp(last_read_ts)
+                        except:
+                            pass
+                    
+                    book_stats = {
+                        "book_title": title,
+                        "book_author": authors,
+                        "total_pages": pages or 0,
+                        "read_pages": total_read_pages or 0,
+                        "reading_progress": progress,
+                        "total_reading_time": total_read_time or 0,  # 秒
+                        "last_read_time": last_read_time,
+                        "highlights_count": highlights or 0,
+                        "notes_count": notes or 0,
+                        "reading_sessions": sessions or 0,
+                        "source": "koreader_sqlite"
+                    }
+                    
+                    parsed_books.append(book_stats)
+                
+                logger.info(f"成功解析KOReader SQLite统计数据：{len(parsed_books)}本书")
+                
+                # 返回综合统计数据
+                return {
+                    "source": "koreader_sqlite",
+                    "total_books": len(parsed_books),
+                    "books": parsed_books,
+                    "updated_at": datetime.utcnow()
+                }
+                
+            finally:
+                # 清理临时文件
+                try:
+                    os.unlink(temp_path)
+                except:
+                    pass
+                    
+        except Exception as e:
+            logger.error(f"解析KOReader SQLite文件失败: {e}")
+            return None
+
 
 # WebDAV PROPFIND 方法
 @router.api_route("/{path:path}", methods=["PROPFIND"], summary="WebDAV PROPFIND")
 async def webdav_propfind(
     path: str,
     request: Request,
-    user: OptionalCurrentUser,
+    user: WebDAVUser,
     db: DbSession
 ) -> Response:
     """
     WebDAV PROPFIND方法
     
-    返回资源属性信息，支持目录列表。
+    返回资源属性信息，支持目录列表。需要HTTP基本认证。
     """
+    # WebDAV需要认证
+    if not user:
+        return Response(
+            status_code=401,
+            headers={
+                "WWW-Authenticate": "Basic realm=\"WebDAV\"",
+                "DAV": "1, 2",
+                "MS-Author-Via": "DAV"
+            }
+        )
+    
     try:
         # 获取Depth头部
         depth = request.headers.get("Depth", "0")
@@ -191,7 +312,7 @@ async def webdav_propfind(
         # 生成PROPFIND响应
         xml_response = WebDAVService.generate_propfind_response(path, depth)
         
-        logger.info(f"WebDAV PROPFIND: {path} (深度: {depth}, 用户: {user.username if user else '匿名'})")
+        logger.info(f"WebDAV PROPFIND: {path} (深度: {depth}, 用户: {user.username})")
         
         return Response(
             content=xml_response,
@@ -215,14 +336,25 @@ async def webdav_propfind(
 @router.get("/{path:path}", summary="WebDAV GET文件")
 async def webdav_get_file(
     path: str,
-    user: OptionalCurrentUser,
+    user: WebDAVUser,
     db: DbSession
 ) -> FileResponse:
     """
     WebDAV GET方法
     
-    下载指定的文件。
+    下载指定的文件。需要HTTP基本认证。
     """
+    # WebDAV需要认证
+    if not user:
+        return Response(
+            status_code=401,
+            headers={
+                "WWW-Authenticate": "Basic realm=\"WebDAV\"",
+                "DAV": "1, 2",
+                "MS-Author-Via": "DAV"
+            }
+        )
+    
     try:
         webdav_root, _ = WebDAVService.ensure_webdav_dirs()
         file_path = webdav_root / unquote(path.lstrip('/'))
@@ -239,7 +371,7 @@ async def webdav_get_file(
                 detail="无法下载目录"
             )
         
-        logger.info(f"WebDAV GET: {path} (用户: {user.username if user else '匿名'})")
+        logger.info(f"WebDAV GET: {path} (用户: {user.username})")
         
         return FileResponse(
             path=str(file_path),
@@ -265,14 +397,25 @@ async def webdav_get_file(
 async def webdav_put_file(
     path: str,
     request: Request,
-    user: OptionalCurrentUser,
+    user: WebDAVUser,
     db: DbSession
 ) -> Response:
     """
     WebDAV PUT方法
     
-    上传文件到指定路径，主要用于KOReader统计文件上传。
+    上传文件到指定路径，主要用于KOReader统计文件上传。需要HTTP基本认证。
     """
+    # WebDAV需要认证
+    if not user:
+        return Response(
+            status_code=401,
+            headers={
+                "WWW-Authenticate": "Basic realm=\"WebDAV\"",
+                "DAV": "1, 2",
+                "MS-Author-Via": "DAV"
+            }
+        )
+    
     try:
         webdav_root, stats_dir = WebDAVService.ensure_webdav_dirs()
         file_path = webdav_root / unquote(path.lstrip('/'))
@@ -294,59 +437,143 @@ async def webdav_put_file(
         if is_stats_file:
             stats_data = WebDAVService.parse_koreader_statistics(file_content)
             if stats_data:
-                logger.info(f"KOReader统计文件上传: {stats_data.get('book_title', 'Unknown')} "
-                           f"(用户: {user.username if user else '匿名'})")
-                
-                # 将统计数据保存到数据库
-                try:
-                    # 查找或创建统计记录
-                    stats_record = None
-                    if stats_data.get('book_title') and stats_data.get('device_id'):
-                        # 尝试找到现有记录
-                        result = await db.execute(
-                            select(ReadingStatistics).where(
-                                and_(
-                                    ReadingStatistics.book_title == stats_data['book_title'],
-                                    ReadingStatistics.device_name == stats_data['device_id']
+                if stats_data.get("source") == "koreader_sqlite":
+                    # 处理SQLite统计数据（包含多本书）
+                    logger.info(f"KOReader SQLite统计文件上传: {stats_data.get('total_books', 0)}本书 "
+                               f"(用户: {user.username})")
+                    
+                    # 为每本书创建统计记录
+                    try:
+                        for book_data in stats_data.get("books", []):
+                            # 查找或创建统计记录
+                            stats_record = None
+                            if book_data.get('book_title'):
+                                # 尝试找到现有记录
+                                result = await db.execute(
+                                    select(ReadingStatistics).where(
+                                        and_(
+                                            ReadingStatistics.book_title == book_data['book_title'],
+                                            ReadingStatistics.user_id == user.id
+                                        )
+                                    )
+                                )
+                                stats_record = result.scalar_one_or_none()
+                            
+                            if not stats_record:
+                                # 创建新记录
+                                stats_record = ReadingStatistics()
+                                stats_record.user_id = user.id
+                                db.add(stats_record)
+                            
+                            # 更新统计数据
+                            stats_record.book_title = book_data.get('book_title')
+                            stats_record.book_author = book_data.get('book_author')
+                            stats_record.total_pages = book_data.get('total_pages', 0)
+                            stats_record.read_pages = book_data.get('read_pages', 0)
+                            stats_record.current_page = book_data.get('read_pages', 0)
+                            stats_record.reading_progress = book_data.get('reading_progress', 0.0)
+                            stats_record.total_reading_time = book_data.get('total_reading_time', 0)
+                            stats_record.highlights_count = book_data.get('highlights_count', 0)
+                            stats_record.notes_count = book_data.get('notes_count', 0)
+                            stats_record.last_read_time = book_data.get('last_read_time')
+                            stats_record.webdav_file_path = path
+                            stats_record.webdav_uploaded_at = datetime.utcnow()
+                            
+                            # 处理设备名称（从用户名推断）
+                            if not book_data.get('device_name'):
+                                stats_record.device_name = f"{user.username}_koreader"
+                            else:
+                                stats_record.device_name = book_data.get('device_name')
+                            
+                            # 序列化原始统计数据，处理datetime对象
+                            try:
+                                raw_stats_copy = book_data.copy()
+                                # 转换datetime对象为字符串
+                                if 'last_read_time' in raw_stats_copy and isinstance(raw_stats_copy['last_read_time'], datetime):
+                                    raw_stats_copy['last_read_time'] = raw_stats_copy['last_read_time'].isoformat()
+                                stats_record.raw_statistics = raw_stats_copy
+                            except Exception as e:
+                                logger.warning(f"序列化原始统计数据失败: {e}")
+                                # 使用简化版本
+                                stats_record.raw_statistics = {
+                                    "book_title": book_data.get('book_title'),
+                                    "book_author": book_data.get('book_author'),
+                                    "reading_progress": book_data.get('reading_progress', 0.0),
+                                    "source": "koreader_sqlite"
+                                }
+                            
+                            # 尝试关联书籍
+                            if book_data.get('book_title'):
+                                book_result = await db.execute(
+                                    select(Book).where(Book.title.ilike(f"%{book_data['book_title']}%"))
+                                )
+                                book = book_result.scalar_one_or_none()
+                                if book:
+                                    stats_record.book_id = book.id
+                        
+                        await db.commit()
+                        logger.info(f"KOReader SQLite统计数据已保存到数据库: {len(stats_data.get('books', []))}条记录")
+                        
+                    except Exception as e:
+                        await db.rollback()
+                        logger.error(f"保存SQLite统计数据失败: {e}")
+                        # 不影响文件上传，继续处理
+                        
+                else:
+                    # 处理单本书的JSON统计数据（原有逻辑）
+                    logger.info(f"KOReader统计文件上传: {stats_data.get('book_title', 'Unknown')} "
+                               f"(用户: {user.username})")
+                    
+                    # 将统计数据保存到数据库
+                    try:
+                        # 查找或创建统计记录
+                        stats_record = None
+                        if stats_data.get('book_title') and stats_data.get('device_id'):
+                            # 尝试找到现有记录
+                            result = await db.execute(
+                                select(ReadingStatistics).where(
+                                    and_(
+                                        ReadingStatistics.book_title == stats_data['book_title'],
+                                        ReadingStatistics.device_name == stats_data['device_id']
+                                    )
                                 )
                             )
-                        )
-                        stats_record = result.scalar_one_or_none()
-                    
-                    if not stats_record:
-                        # 创建新记录
-                        stats_record = ReadingStatistics()
-                        if user:
-                            stats_record.user_id = user.id
-                        db.add(stats_record)
-                    
-                    # 更新统计数据
-                    stats_record.update_from_koreader_data(stats_data)
-                    stats_record.webdav_file_path = path
-                    stats_record.webdav_uploaded_at = datetime.utcnow()
-                    
-                    # 尝试关联书籍
-                    if stats_data.get('book_title'):
-                        book_result = await db.execute(
-                            select(Book).where(Book.title.ilike(f"%{stats_data['book_title']}%"))
-                        )
-                        book = book_result.scalar_one_or_none()
-                        if book:
-                            stats_record.book_id = book.id
-                    
-                    await db.commit()
-                    
-                    logger.info(f"KOReader统计数据已保存到数据库: {stats_record.id}")
-                    
-                except Exception as e:
-                    await db.rollback()
-                    logger.error(f"保存统计数据失败: {e}")
-                    # 不影响文件上传，继续处理
+                            stats_record = result.scalar_one_or_none()
+                        
+                        if not stats_record:
+                            # 创建新记录
+                            stats_record = ReadingStatistics()
+                            if user:
+                                stats_record.user_id = user.id
+                            db.add(stats_record)
+                        
+                        # 更新统计数据
+                        stats_record.update_from_koreader_data(stats_data)
+                        stats_record.webdav_file_path = path
+                        stats_record.webdav_uploaded_at = datetime.utcnow()
+                        
+                        # 尝试关联书籍
+                        if stats_data.get('book_title'):
+                            book_result = await db.execute(
+                                select(Book).where(Book.title.ilike(f"%{stats_data['book_title']}%"))
+                            )
+                            book = book_result.scalar_one_or_none()
+                            if book:
+                                stats_record.book_id = book.id
+                        
+                        await db.commit()
+                        
+                        logger.info(f"KOReader统计数据已保存到数据库: {stats_record.id}")
+                        
+                    except Exception as e:
+                        await db.rollback()
+                        logger.error(f"保存统计数据失败: {e}")
+                        # 不影响文件上传，继续处理
         
         file_existed = file_path.exists()
         status_code = 200 if file_existed else 201
         
-        logger.info(f"WebDAV PUT: {path} ({len(file_content)}字节, 用户: {user.username if user else '匿名'})")
+        logger.info(f"WebDAV PUT: {path} ({len(file_content)}字节, 用户: {user.username})")
         
         return Response(
             status_code=status_code,
@@ -369,14 +596,25 @@ async def webdav_put_file(
 @router.delete("/{path:path}", summary="WebDAV DELETE删除文件")
 async def webdav_delete_file(
     path: str,
-    user: OptionalCurrentUser,
+    user: WebDAVUser,
     db: DbSession
 ) -> Response:
     """
     WebDAV DELETE方法
     
-    删除指定的文件或目录。
+    删除指定的文件或目录。需要HTTP基本认证。
     """
+    # WebDAV需要认证
+    if not user:
+        return Response(
+            status_code=401,
+            headers={
+                "WWW-Authenticate": "Basic realm=\"WebDAV\"",
+                "DAV": "1, 2",
+                "MS-Author-Via": "DAV"
+            }
+        )
+    
     try:
         webdav_root, _ = WebDAVService.ensure_webdav_dirs()
         file_path = webdav_root / unquote(path.lstrip('/'))
@@ -400,7 +638,7 @@ async def webdav_delete_file(
             # 删除文件
             file_path.unlink()
         
-        logger.info(f"WebDAV DELETE: {path} (用户: {user.username if user else '匿名'})")
+        logger.info(f"WebDAV DELETE: {path} (用户: {user.username})")
         
         return Response(
             status_code=204,  # No Content
@@ -424,14 +662,25 @@ async def webdav_delete_file(
 @router.api_route("/{path:path}", methods=["MKCOL"], summary="WebDAV MKCOL创建目录")
 async def webdav_mkcol(
     path: str,
-    user: OptionalCurrentUser,
+    user: WebDAVUser,
     db: DbSession
 ) -> Response:
     """
     WebDAV MKCOL方法
     
-    创建新的目录。
+    创建目录。需要HTTP基本认证。
     """
+    # WebDAV需要认证
+    if not user:
+        return Response(
+            status_code=401,
+            headers={
+                "WWW-Authenticate": "Basic realm=\"WebDAV\"",
+                "DAV": "1, 2",
+                "MS-Author-Via": "DAV"
+            }
+        )
+    
     try:
         webdav_root, _ = WebDAVService.ensure_webdav_dirs()
         dir_path = webdav_root / unquote(path.lstrip('/'))
@@ -452,7 +701,7 @@ async def webdav_mkcol(
         # 创建目录
         dir_path.mkdir()
         
-        logger.info(f"WebDAV MKCOL: {path} (用户: {user.username if user else '匿名'})")
+        logger.info(f"WebDAV MKCOL: {path} (用户: {user.username})")
         
         return Response(
             status_code=201,  # Created

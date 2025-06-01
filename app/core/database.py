@@ -7,7 +7,7 @@
 import logging
 from typing import AsyncGenerator
 
-from sqlalchemy import MetaData
+from sqlalchemy import MetaData, text
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     create_async_engine,
@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.pool import StaticPool
+from sqlalchemy import select
 
 from app.core.config import settings
 
@@ -138,16 +139,31 @@ async def init_database():
     # 创建默认管理员用户（如果配置了）
     if settings.AUTH_USERNAME and settings.AUTH_PASSWORD:
         try:
-            from app.services.auth_service import AuthService
+            from app.models import User
             
             async with async_session_maker() as session:
-                auth_service = AuthService(session)
-                await auth_service.create_admin_user(
-                    username=settings.AUTH_USERNAME,
-                    password=settings.AUTH_PASSWORD
+                # 检查管理员用户是否已存在
+                result = await session.execute(
+                    select(User).where(User.username == settings.AUTH_USERNAME)
                 )
-                await session.commit()
-                logger.info("默认管理员用户已创建")
+                existing_user = result.scalar_one_or_none()
+                
+                if not existing_user:
+                    # 创建新的管理员用户
+                    admin_user = User(
+                        username=settings.AUTH_USERNAME,
+                        email=getattr(settings, 'AUTH_EMAIL', f"{settings.AUTH_USERNAME}@localhost"),
+                        is_active=True,
+                        is_admin=True
+                    )
+                    admin_user.set_password(settings.AUTH_PASSWORD)  # 使用MD5哈希
+                    
+                    session.add(admin_user)
+                    await session.commit()
+                    logger.info(f"默认管理员用户已创建: {settings.AUTH_USERNAME}")
+                else:
+                    logger.info(f"管理员用户已存在: {settings.AUTH_USERNAME}")
+                    
         except Exception as e:
             logger.error(f"创建默认管理员用户失败: {e}")
 
@@ -159,7 +175,7 @@ async def check_database_health() -> bool:
             create_engine()
         
         async with engine.begin() as conn:
-            await conn.execute("SELECT 1")
+            await conn.execute(text("SELECT 1"))
         return True
     except Exception as e:
         logger.error(f"数据库健康检查失败: {e}")

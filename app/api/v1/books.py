@@ -9,7 +9,7 @@ import logging
 import os
 import hashlib
 import mimetypes
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Optional, List, BinaryIO
 from io import BytesIO
@@ -26,9 +26,9 @@ from ebooklib import epub
 
 from app.api.deps import DbSession, CurrentUser, CurrentAdminUser, OptionalCurrentUser
 from app.core.config import settings
-from app.models import Book, User
+from app.models import Book, User, ReadingStatistics
 from app.schemas.opds import BookEntry
-from app.core.database import get_async_session
+from app.core.database import get_session
 from app.core.cache import cache_books, cache_stats, invalidate_cache_pattern
 from app.api.deps import get_current_user, get_current_admin_user
 
@@ -339,14 +339,13 @@ async def upload_book(
             series_index=series_index,
             language=book_language,
             published_date=book_published_date,
+            filename=file.filename,
             file_format=file_format,
             file_size=file_size,
-            file_path=str(file_path),
+            storage_path=str(file_path),
             file_hash=file_hash,
-            original_filename=file.filename,
-            uploaded_by_user_id=current_user.id,
+            uploaded_by_id=current_user.id,
             is_available=True,
-            has_cover=False,
             download_count=0
         )
         
@@ -356,15 +355,25 @@ async def upload_book(
         # 处理封面
         cover_data = metadata.get('cover_data')
         if cover_data:
-            cover_path = BookService.save_cover(cover_data, book.id)
-            if cover_path:
-                book.cover_path = cover_path
-                book.has_cover = True
+            try:
+                # 处理封面图片
+                img = Image.open(BytesIO(cover_data))
+                if img.mode != 'RGB':
+                    img = img.convert('RGB')
                 
-                # 生成缩略图
-                thumbnail_path = BookService.generate_thumbnail(cover_path, book.id)
-                if thumbnail_path:
-                    book.thumbnail_path = thumbnail_path
+                # 调整封面大小
+                img = ImageOps.fit(img, (400, 600), Image.Resampling.LANCZOS)
+                
+                # 保存为二进制数据
+                img_buffer = BytesIO()
+                img.save(img_buffer, format='JPEG', quality=85)
+                
+                book.cover_image = img_buffer.getvalue()
+                book.cover_mime_type = 'image/jpeg'
+                
+                logger.info(f"封面处理成功: {book.title}")
+            except Exception as e:
+                logger.warning(f"封面处理失败: {e}")
         
         await db.commit()
         await db.refresh(book)
@@ -427,7 +436,7 @@ async def download_book(
             detail="书籍暂时不可用"
         )
     
-    if not os.path.exists(book.file_path):
+    if not os.path.exists(book.storage_path):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="书籍文件不存在"
@@ -436,11 +445,10 @@ async def download_book(
     try:
         # 更新下载次数
         book.download_count += 1
-        book.last_downloaded_at = datetime.utcnow()
         await db.commit()
         
         # 获取MIME类型
-        mime_type, _ = mimetypes.guess_type(book.file_path)
+        mime_type, _ = mimetypes.guess_type(book.storage_path)
         if not mime_type:
             mime_type = 'application/octet-stream'
         
@@ -448,11 +456,11 @@ async def download_book(
         
         # 返回文件
         return FileResponse(
-            path=book.file_path,
-            filename=book.original_filename,
+            path=book.storage_path,
+            filename=book.filename,
             media_type=mime_type,
             headers={
-                "Content-Disposition": f"attachment; filename*=UTF-8''{book.original_filename}",
+                "Content-Disposition": f"attachment; filename*=UTF-8''{book.filename}",
                 "Cache-Control": "no-cache"
             }
         )
@@ -494,20 +502,16 @@ async def get_book_cover(
             detail="书籍没有封面"
         )
     
-    # 选择封面文件
-    if size == "thumbnail" and book.thumbnail_path and os.path.exists(book.thumbnail_path):
-        cover_path = book.thumbnail_path
-    elif book.cover_path and os.path.exists(book.cover_path):
-        cover_path = book.cover_path
-    else:
+    if not book.cover_image:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="封面文件不存在"
+            detail="封面数据不存在"
         )
     
-    return FileResponse(
-        path=cover_path,
-        media_type="image/jpeg",
+    # 返回封面图片流
+    return StreamingResponse(
+        BytesIO(book.cover_image),
+        media_type=book.cover_mime_type or "image/jpeg",
         headers={
             "Cache-Control": "public, max-age=86400"  # 缓存1天
         }
@@ -650,12 +654,12 @@ async def get_book_detail(
         "file_format": book.file_format,
         "file_size": book.file_size,
         "file_hash": book.file_hash,
-        "original_filename": book.original_filename,
+        "filename": book.filename,
         "has_cover": book.has_cover,
         "is_available": book.is_available,
         "download_count": book.download_count,
         "last_downloaded_at": book.last_downloaded_at.isoformat() if book.last_downloaded_at else None,
-        "uploaded_by_user_id": book.uploaded_by_user_id,
+        "uploaded_by_id": book.uploaded_by_id,
         "created_at": book.created_at.isoformat(),
         "updated_at": book.updated_at.isoformat()
     }
@@ -762,12 +766,8 @@ async def delete_book(
     try:
         # 删除关联文件
         if delete_files:
-            if book.file_path and os.path.exists(book.file_path):
-                os.remove(book.file_path)
-            if book.cover_path and os.path.exists(book.cover_path):
-                os.remove(book.cover_path)
-            if book.thumbnail_path and os.path.exists(book.thumbnail_path):
-                os.remove(book.thumbnail_path)
+            if book.storage_path and os.path.exists(book.storage_path):
+                os.remove(book.storage_path)
         
         # 删除数据库记录
         await db.delete(book)
@@ -851,6 +851,175 @@ async def get_books_stats(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="获取书籍统计失败"
+        )
+
+
+# 公开阅读统计API (无需认证)
+@router.get("/stats/public", summary="公开阅读统计", description="获取公开的阅读统计数据，无需认证")
+async def get_public_reading_stats(
+    db: DbSession,
+    user_id: Optional[int] = Query(None, description="特定用户ID"),
+    username: Optional[str] = Query(None, description="特定用户名")
+) -> Any:
+    """
+    获取公开的阅读统计数据
+    
+    此端点无需认证，用于博客等公开展示场景。
+    只返回已设置为公开的用户数据。
+    """
+    try:
+        # 构建用户查询
+        user_query = select(User)
+        
+        if user_id:
+            user_query = user_query.where(User.id == user_id)
+        elif username:
+            user_query = user_query.where(User.username == username)
+        else:
+            # 如果没有指定用户，返回第一个管理员用户的公开数据（默认展示）
+            user_query = user_query.where(User.is_admin == True).limit(1)
+        
+        user_result = await db.execute(user_query)
+        user = user_result.scalar_one_or_none()
+        
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="用户不存在"
+            )
+        
+        # 获取用户的阅读统计
+        stats_query = (
+            select(ReadingStatistics)
+            .where(ReadingStatistics.user_id == user.id)
+            .order_by(ReadingStatistics.updated_at.desc())
+        )
+        
+        stats_result = await db.execute(stats_query)
+        statistics = stats_result.scalars().all()
+        
+        # 计算统计汇总
+        total_books = len(statistics)
+        completed_books = len([s for s in statistics if s.reading_progress >= 100])
+        total_reading_time = sum(s.total_reading_time or 0 for s in statistics)
+        avg_progress = sum(s.reading_progress or 0 for s in statistics) / total_books if total_books > 0 else 0
+        
+        # 准备公开展示的数据
+        public_stats = []
+        for stat in statistics:
+            public_stats.append({
+                "book_title": stat.book_title,
+                "book_author": stat.book_author, 
+                "reading_progress": stat.reading_progress,
+                "completion_status": stat.completion_status,
+                "total_reading_time": stat.total_reading_time,
+                "reading_time_formatted": stat.reading_time_formatted,
+                "last_read_time": stat.last_read_time.isoformat() if stat.last_read_time else None,
+                "device_name": stat.device_name,
+                "current_page": stat.current_page,
+                "total_pages": stat.total_pages
+            })
+        
+        # 最近阅读的书籍（取前10本）
+        recent_books = sorted(
+            [s for s in public_stats if s["last_read_time"]],
+            key=lambda x: x["last_read_time"],
+            reverse=True
+        )[:10]
+        
+        # 已完成的书籍
+        completed_books_list = [s for s in public_stats if s["reading_progress"] >= 100]
+        
+        # 正在阅读的书籍
+        reading_books = [
+            s for s in public_stats 
+            if 0 < s["reading_progress"] < 100
+        ][:10]
+        
+        return {
+            "user": {
+                "username": user.username,
+                "total_books": total_books,
+                "completed_books": len(completed_books_list),
+                "reading_books": len(reading_books),
+                "total_reading_time": total_reading_time,
+                "total_reading_hours": total_reading_time // 3600,
+                "avg_progress": round(avg_progress, 1)
+            },
+            "summary": {
+                "total_books": total_books,
+                "completed_count": len(completed_books_list),
+                "reading_count": len(reading_books),
+                "completion_rate": round(len(completed_books_list) / total_books * 100, 1) if total_books > 0 else 0,
+                "total_reading_time": total_reading_time,
+                "avg_progress": round(avg_progress, 1)
+            },
+            "recent_books": recent_books,
+            "completed_books": completed_books_list,
+            "reading_books": reading_books,
+            "updated_at": datetime.utcnow().isoformat()
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取公开阅读统计失败: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="获取公开阅读统计失败"
+        )
+
+
+@router.get("/stats/overview", summary="阅读统计概览")
+async def get_reading_stats_overview(
+    current_user: CurrentUser,
+    db: DbSession
+) -> Any:
+    """
+    获取阅读统计概览数据
+    
+    需要认证，用于前端概览页面
+    """
+    try:
+        # 构建查询
+        query = select(ReadingStatistics)
+        
+        # 非管理员只能查看自己的统计
+        if not current_user.is_admin:
+            query = query.where(ReadingStatistics.user_id == current_user.id)
+        
+        result = await db.execute(query)
+        statistics = result.scalars().all()
+        
+        # 计算统计数据
+        total_books = len(statistics)
+        completed_books = len([s for s in statistics if s.reading_progress >= 100])
+        reading_books = len([s for s in statistics if 0 < s.reading_progress < 100])
+        total_reading_time = sum(s.total_reading_time or 0 for s in statistics)
+        
+        # 最近阅读的书籍
+        recent_stats = [
+            s for s in statistics 
+            if s.last_read_time and s.last_read_time >= datetime.utcnow() - timedelta(days=30)
+        ]
+        
+        return {
+            "total_books": total_books,
+            "completed_books": completed_books,
+            "reading_books": reading_books,
+            "completion_rate": round(completed_books / total_books * 100, 1) if total_books > 0 else 0,
+            "total_reading_time": total_reading_time,
+            "total_reading_hours": total_reading_time // 3600,
+            "avg_reading_time": total_reading_time // total_books if total_books > 0 else 0,
+            "recent_activity_count": len(recent_stats),
+            "devices_count": len(set(s.device_name for s in statistics if s.device_name))
+        }
+        
+    except Exception as e:
+        logger.error(f"获取阅读统计概览失败: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="获取阅读统计概览失败"
         )
 
 

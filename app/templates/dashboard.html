@@ -3,7 +3,7 @@
 {% block content %}
 <!-- 统计卡片行 -->
 <div class="row mb-4">
-    <div class="col-md-3 mb-3">
+    <div class="col-xl-2 col-lg-4 col-md-6 mb-3">
         <div class="card stat-card primary">
             <div class="card-body text-center">
                 <i class="bi bi-people fs-1 mb-2"></i>
@@ -14,7 +14,7 @@
         </div>
     </div>
     
-    <div class="col-md-3 mb-3">
+    <div class="col-xl-2 col-lg-4 col-md-6 mb-3">
         <div class="card stat-card success">
             <div class="card-body text-center">
                 <i class="bi bi-book fs-1 mb-2"></i>
@@ -25,7 +25,7 @@
         </div>
     </div>
     
-    <div class="col-md-3 mb-3">
+    <div class="col-xl-2 col-lg-4 col-md-6 mb-3">
         <div class="card stat-card warning">
             <div class="card-body text-center">
                 <i class="bi bi-phone fs-1 mb-2"></i>
@@ -36,7 +36,7 @@
         </div>
     </div>
     
-    <div class="col-md-3 mb-3">
+    <div class="col-xl-2 col-lg-4 col-md-6 mb-3">
         <div class="card stat-card">
             <div class="card-body text-center">
                 <i class="bi bi-download fs-1 mb-2"></i>
@@ -45,6 +45,30 @@
                 <small class="opacity-75">{{ stats.activity.total_syncs }} 次同步</small>
             </div>
         </div>
+    </div>
+    
+    <div class="col-xl-2 col-lg-4 col-md-6 mb-3">
+        <div class="card stat-card" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
+            <div class="card-body text-center">
+                <i class="bi bi-graph-up fs-1 mb-2"></i>
+                <h3 class="mb-1">{{ stats.reading_stats.total or 0 }}</h3>
+                <p class="mb-0">阅读记录</p>
+                <small class="opacity-75">统计分析</small>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-xl-2 col-lg-4 col-md-6 mb-3">
+        <a href="/api/v1/web/statistics" class="text-decoration-none">
+            <div class="card stat-card" style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: white; cursor: pointer; transition: transform 0.3s ease;">
+                <div class="card-body text-center">
+                    <i class="bi bi-bar-chart-line fs-1 mb-2"></i>
+                    <h3 class="mb-1">详细</h3>
+                    <p class="mb-0">统计分析</p>
+                    <small class="opacity-75">点击查看</small>
+                </div>
+            </div>
+        </a>
     </div>
 </div>
 
@@ -133,7 +157,7 @@
                                     {% else %}
                                     <span class="badge bg-secondary">用户</span>
                                     {% endif %}
-                                    <small class="text-muted d-block">{{ user_item.device_count }} 设备</small>
+                                    <small class="text-muted d-block">{{ user_device_counts[user_item.id] }} 设备</small>
                                 </td>
                             </tr>
                             {% endfor %}

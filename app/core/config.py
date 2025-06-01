@@ -105,7 +105,7 @@ class Settings(BaseSettings):
     
     # 性能优化配置
     REDIS_URL: str = "redis://localhost:6379/0"
-    ENABLE_REDIS_CACHE: bool = True
+    ENABLE_REDIS_CACHE: bool = False  # 默认禁用，避免连接错误
     CACHE_TTL_DEFAULT: int = 3600  # 默认缓存1小时
     CACHE_TTL_OPDS: int = 1800     # OPDS缓存30分钟
     CACHE_TTL_BOOKS: int = 7200    # 书籍列表缓存2小时
@@ -257,12 +257,13 @@ class Settings(BaseSettings):
         for directory in directories:
             directory.mkdir(parents=True, exist_ok=True)
     
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-        case_sensitive = True
-        # 支持别名和原始字段名
-        allow_population_by_field_name = True
+    model_config = {
+        "env_file": ".env",
+        "env_file_encoding": "utf-8", 
+        "case_sensitive": True,
+        "populate_by_name": True,
+        "extra": "allow"  # 允许额外字段
+    }
 
 
 @lru_cache()

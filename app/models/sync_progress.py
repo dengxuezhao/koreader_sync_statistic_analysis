@@ -38,7 +38,7 @@ class SyncProgress(Base):
     
     # KOReader特定数据
     device_name = Column(String(100), nullable=True)  # 设备名称
-    device = Column(String(100), nullable=True)  # 设备标识
+    device_identifier = Column(String(100), nullable=True)  # 设备标识
     
     # 位置信息（KOReader专用字段）
     page = Column(Integer, nullable=True)  # 页码
@@ -62,7 +62,7 @@ class SyncProgress(Base):
     
     # 关系
     user = relationship("User", back_populates="sync_progress")
-    device_rel = relationship("Device", back_populates="sync_progress")
+    device = relationship("Device", back_populates="sync_progress")
     book = relationship("Book", back_populates="sync_progress")
     
     def __repr__(self) -> str:
@@ -123,7 +123,7 @@ class SyncProgress(Base):
             "document": self.document,
             "progress": str(self.progress),
             "percentage": self.percentage,
-            "device": self.device or self.device_name,
+            "device": self.device_identifier or self.device_name,
             "device_id": str(self.device_id) if self.device_id else None,
             "timestamp": int(self.last_sync_at.timestamp()) if self.last_sync_at else None,
         }
@@ -155,7 +155,7 @@ class SyncProgress(Base):
             "percentage": self.percentage,
             "reading_percentage": self.reading_percentage,
             "device_name": self.device_name,
-            "device": self.device,
+            "device_identifier": self.device_identifier,
             "page": self.page,
             "pos": self.pos,
             "chapter": self.chapter,
