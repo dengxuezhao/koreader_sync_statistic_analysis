@@ -7,7 +7,7 @@ import plotly.graph_objects as go
 import plotly.express as px
 from typing import Dict, Any, List, Optional, Union
 import pandas as pd
-from config import DESIGN_SYSTEM, CHART_CONFIG
+from app.frontend.config import DESIGN_SYSTEM, CHART_CONFIG
 
 def apply_custom_css():
     """应用自定义 CSS 样式"""

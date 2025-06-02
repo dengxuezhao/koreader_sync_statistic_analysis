@@ -195,6 +195,11 @@ class StatisticsAPI:
     def get_reading_statistics(page: int = 1, size: int = 20) -> Dict[str, Any]:
         """获取阅读统计数据"""
         return api_client.get("/api/v1/web/statistics/json", {"page": page, "size": size})
+    
+    @staticmethod
+    def get_enhanced_reading_statistics() -> Dict[str, Any]:
+        """获取增强的阅读统计分析数据"""
+        return api_client.get("/api/v1/books/stats/enhanced")
 
 # 健康检查
 def check_api_health() -> bool:

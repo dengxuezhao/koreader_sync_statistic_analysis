@@ -11,7 +11,7 @@ import hashlib
 import mimetypes
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Optional, List, BinaryIO
+from typing import Any, Optional, List, BinaryIO, Dict
 from io import BytesIO
 
 from fastapi import APIRouter, HTTPException, status, UploadFile, File, Form, Query, Request, Response
@@ -1021,6 +1021,367 @@ async def get_reading_stats_overview(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="获取阅读统计概览失败"
         )
+
+
+@router.get("/stats/enhanced", summary="增强阅读统计分析")
+async def get_enhanced_reading_stats(
+    current_user: CurrentUser,
+    db: DbSession
+) -> Any:
+    """
+    获取增强的阅读统计分析，包含四个维度：
+    A. 整体阅读总结
+    B. 单书统计数据  
+    C. 阅读时间模式分析
+    D. 类型、作者与语言分析
+    """
+    
+    try:
+        # 获取用户的阅读统计数据
+        statistics_query = select(ReadingStatistics).where(
+            ReadingStatistics.user_id == current_user.id
+        ).order_by(ReadingStatistics.last_read_time.desc())
+        
+        result = await db.execute(statistics_query)
+        statistics = result.scalars().all()
+        
+        if not statistics:
+            return {
+                "overall_summary": {"message": "暂无阅读数据"},
+                "per_book_stats": [],
+                "time_patterns": {"message": "暂无时间模式数据"},
+                "metadata_analysis": {"message": "暂无元数据分析"},
+                "total_records": 0,
+                "generated_at": datetime.utcnow().isoformat()
+            }
+        
+        # A. 整体阅读总结
+        overall_summary = calculate_overall_summary(statistics)
+        
+        # B. 单书统计数据
+        per_book_stats = calculate_per_book_stats(statistics)
+        
+        # C. 阅读时间模式分析 (基于现有数据的估算)
+        time_patterns = calculate_time_patterns(statistics)
+        
+        # D. 类型、作者与语言分析
+        metadata_analysis = await calculate_metadata_analysis(statistics, db)
+        
+        return {
+            "overall_summary": overall_summary,
+            "per_book_stats": per_book_stats,
+            "time_patterns": time_patterns,
+            "metadata_analysis": metadata_analysis,
+            "total_records": len(statistics),
+            "generated_at": datetime.utcnow().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"获取增强阅读统计失败: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="获取增强阅读统计失败"
+        )
+
+
+def calculate_overall_summary(statistics: List[ReadingStatistics]) -> Dict[str, Any]:
+    """计算整体阅读总结 (A)"""
+    
+    total_books = len(statistics)
+    total_reading_time = sum(s.total_reading_time or 0 for s in statistics)
+    total_reading_hours = total_reading_time / 3600
+    
+    # 计算独立页数 (基于已读页数估算)
+    total_unique_pages = sum(s.read_pages or s.current_page or 0 for s in statistics)
+    
+    # 完成度分析
+    completed_books = len([s for s in statistics if s.reading_progress >= 100])
+    nearly_completed = len([s for s in statistics if 80 <= s.reading_progress < 100])
+    in_progress = len([s for s in statistics if 0 < s.reading_progress < 80])
+    
+    # 时间分析 (基于记录时间估算)
+    now = datetime.utcnow()
+    this_year_books = len([s for s in statistics if s.created_at and s.created_at.year == now.year])
+    this_month_books = len([s for s in statistics if s.created_at and s.created_at.year == now.year and s.created_at.month == now.month])
+    
+    # 阅读会话分析 (基于现有数据估算)
+    reading_sessions = sum(1 for s in statistics if s.total_reading_time and s.total_reading_time > 0)
+    avg_session_duration = (total_reading_time / reading_sessions / 60) if reading_sessions > 0 else 0  # 分钟
+    
+    # 平均每日/周/月阅读时长 (基于创建时间范围估算)
+    if statistics:
+        date_range = (now - min(s.created_at for s in statistics if s.created_at)).days or 1
+        avg_daily_minutes = (total_reading_time / 60) / date_range if date_range > 0 else 0
+        avg_weekly_hours = avg_daily_minutes * 7 / 60
+        avg_monthly_hours = avg_daily_minutes * 30 / 60
+    else:
+        avg_daily_minutes = avg_weekly_hours = avg_monthly_hours = 0
+    
+    return {
+        "total_interactive_books": total_books,
+        "total_reading_time_hours": round(total_reading_hours, 2),
+        "total_reading_time_seconds": total_reading_time,
+        "total_unique_pages": total_unique_pages,
+        "completed_books": completed_books,
+        "nearly_completed_books": nearly_completed,
+        "in_progress_books": in_progress,
+        "completion_rate": round(completed_books / total_books * 100, 1) if total_books > 0 else 0,
+        "avg_daily_reading_minutes": round(avg_daily_minutes, 1),
+        "avg_weekly_reading_hours": round(avg_weekly_hours, 1),
+        "avg_monthly_reading_hours": round(avg_monthly_hours, 1),
+        "avg_session_duration_minutes": round(avg_session_duration, 1),
+        "this_year_books": this_year_books,
+        "this_month_books": this_month_books,
+        "reading_sessions_count": reading_sessions,
+        "key_metrics": {
+            "总互动书籍数量": f"{total_books} 本",
+            "总阅读时长": f"{total_reading_hours:.1f} 小时",
+            "总阅读独立页数": f"{total_unique_pages:,} 页",
+            "平均单次阅读会话时长": f"{avg_session_duration:.0f} 分钟",
+            "本年度已读/互动书籍数量": f"{this_year_books} 本",
+            "本月已读/互动书籍数量": f"{this_month_books} 本"
+        }
+    }
+
+
+def calculate_per_book_stats(statistics: List[ReadingStatistics]) -> List[Dict[str, Any]]:
+    """计算单书统计数据 (B)"""
+    
+    books_stats = []
+    
+    for stat in statistics:
+        # 基础信息
+        book_stat = {
+            "book_title": stat.book_title or "未知书籍",
+            "book_author": stat.book_author or "未知作者",
+            "total_pages": stat.total_pages or 0,
+            "read_pages": stat.read_pages or stat.current_page or 0,
+            "current_page": stat.current_page or 0,
+            "reading_progress": round(stat.reading_progress or 0, 1),
+            "completion_percentage": round(stat.reading_progress or 0, 1),
+            "total_reading_time_hours": round((stat.total_reading_time or 0) / 3600, 3),
+            "total_reading_time_seconds": stat.total_reading_time or 0,
+            "highlights_count": stat.highlights_count or 0,
+            "notes_count": stat.notes_count or 0,
+            "bookmarks_count": stat.bookmarks_count or 0,
+            "device_name": stat.device_name or "未知设备",
+            "last_read_time": stat.last_read_time.isoformat() if stat.last_read_time else None,
+            "first_read_time": stat.first_read_time.isoformat() if stat.first_read_time else None,
+            "completion_status": stat.completion_status
+        }
+        
+        # 计算阅读速度 (页/小时)
+        if stat.total_reading_time and stat.total_reading_time > 0:
+            hours = stat.total_reading_time / 3600
+            read_pages = stat.read_pages or stat.current_page or 0
+            book_stat["reading_speed_pages_per_hour"] = round(read_pages / hours, 1) if hours > 0 else 0
+        else:
+            book_stat["reading_speed_pages_per_hour"] = 0
+        
+        # 阅读会话次数 (基于现有数据估算)
+        book_stat["reading_sessions"] = 1 if stat.total_reading_time and stat.total_reading_time > 0 else 0
+        
+        # 完成度计算 (两种方式)
+        if stat.total_pages and stat.total_pages > 0:
+            # 方式1: 最大页码比例
+            max_page_percentage = (stat.current_page or 0) / stat.total_pages * 100
+            # 方式2: 已读页数比例  
+            read_pages_percentage = (stat.read_pages or 0) / stat.total_pages * 100
+            book_stat["completion_by_max_page"] = round(max_page_percentage, 1)
+            book_stat["completion_by_read_pages"] = round(read_pages_percentage, 1)
+        else:
+            book_stat["completion_by_max_page"] = 0
+            book_stat["completion_by_read_pages"] = 0
+        
+        books_stats.append(book_stat)
+    
+    # 按阅读时间排序
+    books_stats.sort(key=lambda x: x["total_reading_time_seconds"], reverse=True)
+    
+    return books_stats
+
+
+def calculate_time_patterns(statistics: List[ReadingStatistics]) -> Dict[str, Any]:
+    """计算阅读时间模式分析 (C) - 基于现有数据估算"""
+    
+    # 由于缺乏详细的page_stat_data，我们基于现有的时间戳进行分析
+    time_data = []
+    
+    for stat in statistics:
+        # 使用last_read_time作为阅读时间参考
+        if stat.last_read_time:
+            time_data.append({
+                "datetime": stat.last_read_time,
+                "reading_time": stat.total_reading_time or 0,
+                "hour": stat.last_read_time.hour,
+                "weekday": stat.last_read_time.weekday(),  # 0=Monday, 6=Sunday
+                "month": stat.last_read_time.month
+            })
+    
+    if not time_data:
+        return {
+            "hourly_distribution": {},
+            "weekday_distribution": {},
+            "monthly_distribution": {},
+            "reading_heatmap_data": [],
+            "peak_reading_hours": [],
+            "message": "暂无时间模式数据"
+        }
+    
+    # 按小时分布
+    hourly_dist = {}
+    for i in range(24):
+        hourly_dist[i] = {
+            "count": len([d for d in time_data if d["hour"] == i]),
+            "total_time": sum(d["reading_time"] for d in time_data if d["hour"] == i),
+            "avg_session_time": 0
+        }
+        if hourly_dist[i]["count"] > 0:
+            hourly_dist[i]["avg_session_time"] = hourly_dist[i]["total_time"] / hourly_dist[i]["count"]
+    
+    # 按星期分布
+    weekday_names = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
+    weekday_dist = {}
+    for i in range(7):
+        weekday_dist[weekday_names[i]] = {
+            "count": len([d for d in time_data if d["weekday"] == i]),
+            "total_time": sum(d["reading_time"] for d in time_data if d["weekday"] == i),
+            "avg_session_time": 0
+        }
+        if weekday_dist[weekday_names[i]]["count"] > 0:
+            weekday_dist[weekday_names[i]]["avg_session_time"] = weekday_dist[weekday_names[i]]["total_time"] / weekday_dist[weekday_names[i]]["count"]
+    
+    # 按月份分布
+    month_names = ["1月", "2月", "3月", "4月", "5月", "6月", "7月", "8月", "9月", "10月", "11月", "12月"]
+    monthly_dist = {}
+    for i in range(1, 13):
+        month_key = month_names[i-1]
+        monthly_dist[month_key] = {
+            "count": len([d for d in time_data if d["month"] == i]),
+            "total_time": sum(d["reading_time"] for d in time_data if d["month"] == i),
+            "avg_session_time": 0
+        }
+        if monthly_dist[month_key]["count"] > 0:
+            monthly_dist[month_key]["avg_session_time"] = monthly_dist[month_key]["total_time"] / monthly_dist[month_key]["count"]
+    
+    # 生成热力图数据 (hour vs weekday)
+    heatmap_data = []
+    for hour in range(24):
+        for weekday in range(7):
+            count = len([d for d in time_data if d["hour"] == hour and d["weekday"] == weekday])
+            total_time = sum(d["reading_time"] for d in time_data if d["hour"] == hour and d["weekday"] == weekday)
+            heatmap_data.append({
+                "hour": hour,
+                "weekday": weekday,
+                "weekday_name": weekday_names[weekday],
+                "count": count,
+                "total_time": total_time,
+                "intensity": total_time / 3600  # 转换为小时
+            })
+    
+    # 找出阅读高峰时段
+    peak_hours = sorted(hourly_dist.items(), key=lambda x: x[1]["total_time"], reverse=True)[:5]
+    peak_reading_hours = [{"hour": hour, "total_time": data["total_time"], "count": data["count"]} for hour, data in peak_hours]
+    
+    return {
+        "hourly_distribution": hourly_dist,
+        "weekday_distribution": weekday_dist,
+        "monthly_distribution": monthly_dist,
+        "reading_heatmap_data": heatmap_data,
+        "peak_reading_hours": peak_reading_hours,
+        "total_time_entries": len(time_data)
+    }
+
+
+async def calculate_metadata_analysis(statistics: List[ReadingStatistics], db) -> Dict[str, Any]:
+    """计算类型、作者与语言分析 (D)"""
+    
+    # 作者分析
+    author_stats = {}
+    for stat in statistics:
+        author = stat.book_author or "未知作者"
+        if author not in author_stats:
+            author_stats[author] = {
+                "books_count": 0,
+                "total_reading_time": 0,
+                "completed_books": 0,
+                "avg_progress": 0
+            }
+        
+        author_stats[author]["books_count"] += 1
+        author_stats[author]["total_reading_time"] += stat.total_reading_time or 0
+        if stat.reading_progress >= 100:
+            author_stats[author]["completed_books"] += 1
+    
+    # 计算作者平均进度
+    for author in author_stats:
+        author_books = [s for s in statistics if (s.book_author or "未知作者") == author]
+        author_stats[author]["avg_progress"] = sum(s.reading_progress or 0 for s in author_books) / len(author_books)
+    
+    # 按阅读书籍数量排序
+    top_authors = sorted(author_stats.items(), key=lambda x: x[1]["books_count"], reverse=True)[:10]
+    
+    # 语言分析 (基于现有book数据)
+    language_stats = {}
+    try:
+        # 从关联的书籍表获取语言信息
+        book_ids = [s.book_id for s in statistics if s.book_id]
+        if book_ids:
+            from app.models.book import Book
+            books_query = select(Book.language, func.count(Book.id)).where(Book.id.in_(book_ids)).group_by(Book.language)
+            books_result = await db.execute(books_query)
+            language_data = books_result.fetchall()
+            
+            for lang, count in language_data:
+                lang_key = lang or "未知语言"
+                # 计算该语言书籍的阅读统计
+                lang_books = [s for s in statistics if s.book_id and any(book_id for book_id in book_ids)]
+                total_time = sum(s.total_reading_time or 0 for s in lang_books)
+                avg_speed = 0  # 需要更复杂的计算
+                
+                language_stats[lang_key] = {
+                    "books_count": count,
+                    "total_reading_time": total_time,
+                    "avg_reading_speed": avg_speed
+                }
+    except Exception as e:
+        logger.warning(f"语言分析失败: {e}")
+        language_stats = {"未知语言": {"books_count": len(statistics), "total_reading_time": sum(s.total_reading_time or 0 for s in statistics), "avg_reading_speed": 0}}
+    
+    # 设备分析
+    device_stats = {}
+    for stat in statistics:
+        device = stat.device_name or "未知设备"
+        if device not in device_stats:
+            device_stats[device] = {
+                "books_count": 0,
+                "total_reading_time": 0,
+                "avg_session_duration": 0
+            }
+        
+        device_stats[device]["books_count"] += 1
+        device_stats[device]["total_reading_time"] += stat.total_reading_time or 0
+    
+    # 计算设备平均会话时长
+    for device in device_stats:
+        device_books = [s for s in statistics if (s.device_name or "未知设备") == device]
+        sessions = len([s for s in device_books if s.total_reading_time and s.total_reading_time > 0])
+        if sessions > 0:
+            device_stats[device]["avg_session_duration"] = device_stats[device]["total_reading_time"] / sessions
+    
+    return {
+        "author_analysis": {
+            "top_authors": [{"author": author, **stats} for author, stats in top_authors],
+            "total_authors": len(author_stats)
+        },
+        "language_analysis": language_stats,
+        "device_analysis": device_stats,
+        "data_quality": {
+            "books_with_author": len([s for s in statistics if s.book_author and s.book_author != "未知作者"]),
+            "books_without_author": len([s for s in statistics if not s.book_author or s.book_author == "未知作者"]),
+            "total_books": len(statistics)
+        }
+    }
 
 
 # 缓存清理函数

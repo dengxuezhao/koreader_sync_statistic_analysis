@@ -86,7 +86,20 @@ app = FastAPI(
     version="1.0.0",
     docs_url="/docs",
     redoc_url="/redoc",
-    lifespan=lifespan
+    lifespan=lifespan,
+    swagger_ui_parameters={
+        "deepLinking": True,
+        "displayRequestDuration": True,
+        "filter": True,
+        "showExtensions": True,
+        "showCommonExtensions": True,
+        "tryItOutEnabled": True,
+        "requestSnippetsEnabled": True,
+        "persistAuthorization": True,
+        "docExpansion": "list",
+        "defaultModelRendering": "model",
+        "preauthorizeApiKey": False
+    }
 )
 
 # 添加静态文件服务
